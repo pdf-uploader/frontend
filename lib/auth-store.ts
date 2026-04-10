@@ -1,3 +1,4 @@
+import { authUserFromAccessToken, normalizeAuthUser } from "@/lib/auth-user";
 import { AuthUser } from "@/lib/types";
 
 const ACCESS_TOKEN_KEY = "pdf_manager_access_token";
@@ -55,9 +56,20 @@ export const authStore = {
       return;
     }
     accessToken = window.sessionStorage.getItem(ACCESS_TOKEN_KEY);
-    csrfToken = window.sessionStorage.getItem(CSRF_KEY);
+    csrfToken = window.sessionStorage.getItem(CSRF_KEY) ?? readCookie("csrfValue");
     const userRaw = window.sessionStorage.getItem(USER_KEY);
-    currentUser = userRaw ? (JSON.parse(userRaw) as AuthUser) : null;
+    if (userRaw) {
+      try {
+        currentUser = normalizeAuthUser(JSON.parse(userRaw) as unknown);
+      } catch {
+        currentUser = null;
+      }
+    } else {
+      currentUser = null;
+    }
+    if (!currentUser && accessToken) {
+      currentUser = authUserFromAccessToken(accessToken);
+    }
     updateSnapshot();
     emit();
   },
@@ -83,8 +95,9 @@ export const authStore = {
   getUser(): AuthUser | null {
     return currentUser;
   },
-  setUser(user: AuthUser | null): void {
-    currentUser = user;
+  /** Accepts API-shaped user objects; role casing and alternate keys are normalized. */
+  setUser(user: unknown | null): void {
+    currentUser = user == null ? null : normalizeAuthUser(user);
     updateSnapshot();
     persist();
     emit();
@@ -102,3 +115,12 @@ export const authStore = {
     return () => listeners.delete(listener);
   },
 };
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  const prefix = `${name}=`;
+  const found = document.cookie.split("; ").find((cookie) => cookie.startsWith(prefix));
+  return found ? decodeURIComponent(found.slice(prefix.length)) : null;
+}

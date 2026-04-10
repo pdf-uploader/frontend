@@ -8,6 +8,7 @@ import { AppUser, Folder } from "@/lib/types";
 export function AdminPanel() {
   const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [folderName, setFolderName] = useState("");
   const [uploadFolderId, setUploadFolderId] = useState("");
@@ -24,9 +25,10 @@ export function AdminPanel() {
   });
 
   const createUserMutation = useMutation({
-    mutationFn: async () => api.post("/users/signUp/user", { email, password }),
+    mutationFn: async () => api.post("/users/signUp/user", { email, username, password }),
     onSuccess: () => {
       setEmail("");
+      setUsername("");
       setPassword("");
       queryClient.invalidateQueries({ queryKey: ["users"] });
     },
@@ -38,7 +40,7 @@ export function AdminPanel() {
   });
 
   const createFolderMutation = useMutation({
-    mutationFn: async () => api.post("/folders", { name: folderName }),
+    mutationFn: async () => api.post("/folders", { foldername: folderName }),
     onSuccess: () => {
       setFolderName("");
       queryClient.invalidateQueries({ queryKey: ["folders"] });
@@ -49,7 +51,7 @@ export function AdminPanel() {
     mutationFn: async () => {
       if (!uploadFolderId || !filesToUpload?.length) return;
       const formData = new FormData();
-      Array.from(filesToUpload).forEach((file) => formData.append("files", file));
+      Array.from(filesToUpload).forEach((file) => formData.append("pdf", file));
       await api.post(`/files/upload/${uploadFolderId}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
@@ -76,17 +78,30 @@ export function AdminPanel() {
         <h3 className="text-base font-semibold">Create User</h3>
         <form className="space-y-3" onSubmit={submitCreateUser}>
           <input className="w-full rounded border p-2 text-sm" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input className="w-full rounded border p-2 text-sm" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
           <input className="w-full rounded border p-2 text-sm" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <button className="rounded bg-blue-600 px-3 py-2 text-sm text-white" disabled={createUserMutation.isPending}>
+          <button
+            className="rounded bg-blue-600 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={createUserMutation.isPending || !email || !username || !password}
+          >
             Create
           </button>
         </form>
 
         <h4 className="pt-2 text-sm font-semibold text-slate-700">Users</h4>
+        {usersQuery.isError && (
+          <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+            Could not load users. If you are an admin, check that GET /users is allowed and the API is running.
+          </p>
+        )}
+        {usersQuery.isLoading && <p className="text-xs text-slate-500">Loading users...</p>}
         <ul className="space-y-2 text-sm">
           {usersQuery.data?.map((user) => (
             <li key={user.id} className="flex items-center justify-between rounded border border-slate-200 p-2">
-              <span>{user.email}</span>
+              <span>
+                {user.email}
+                {user.username ? <span className="ml-2 text-xs text-slate-500">({user.username})</span> : null}
+              </span>
               <button onClick={() => deleteUserMutation.mutate(user.id)} className="text-xs text-red-600">
                 Delete
               </button>
@@ -99,17 +114,27 @@ export function AdminPanel() {
         <h3 className="text-base font-semibold">Folder & File Management</h3>
         <div className="space-y-2">
           <input className="w-full rounded border p-2 text-sm" placeholder="Folder name" value={folderName} onChange={(e) => setFolderName(e.target.value)} />
-          <button onClick={() => createFolderMutation.mutate()} className="rounded bg-blue-600 px-3 py-2 text-sm text-white">
+          <button
+            onClick={() => createFolderMutation.mutate()}
+            className="rounded bg-blue-600 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!folderName || createFolderMutation.isPending}
+          >
             Create Folder
           </button>
         </div>
 
+        {foldersQuery.isError && (
+          <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+            Could not load folders. Check GET /folders and your permissions.
+          </p>
+        )}
+        {foldersQuery.isLoading && <p className="text-xs text-slate-500">Loading folders...</p>}
         <div className="space-y-2">
           <select className="w-full rounded border p-2 text-sm" value={uploadFolderId} onChange={(e) => setUploadFolderId(e.target.value)}>
             <option value="">Select folder</option>
             {foldersQuery.data?.map((folder) => (
               <option key={folder.id} value={folder.id}>
-                {folder.name}
+                {folder.foldername}
               </option>
             ))}
           </select>

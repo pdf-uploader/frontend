@@ -13,8 +13,7 @@ export interface AuthTokens {
 
 export interface SignInResponse {
   accessToken: string;
-  csrfToken?: string;
-  user: AuthUser;
+  user?: AuthUser;
 }
 
 export interface FolderFile {
@@ -25,7 +24,7 @@ export interface FolderFile {
 
 export interface Folder {
   id: string;
-  name: string;
+  foldername: string;
   files: FolderFile[];
 }
 
@@ -33,13 +32,13 @@ export interface FileDetails {
   id: string;
   filename: string;
   folderId: string;
-  folderName?: string;
-  fileUrl: string;
   createdAt: string;
+  content?: string[];
+  fileUrl?: string;
 }
 
 export interface SearchResult {
-  id: string;
+  id: string; // unique result row id
   fileId: string;
   filename: string;
   page: number;
@@ -50,5 +49,6 @@ export interface AppUser {
   id: string;
   email: string;
   role: UserRole;
+  username?: string;
   createdAt?: string;
 }

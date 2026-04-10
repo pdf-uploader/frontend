@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
+import axios from "axios";
 import { signIn } from "@/lib/api";
 
 export default function LoginPage() {
@@ -19,6 +20,19 @@ export default function LoginPage() {
     event.preventDefault();
     loginMutation.mutate();
   };
+
+  const loginErrorMessage = (() => {
+    if (!loginMutation.error) {
+      return "";
+    }
+    if (axios.isAxiosError(loginMutation.error)) {
+      const apiMessage =
+        (loginMutation.error.response?.data as { message?: string } | undefined)?.message ??
+        loginMutation.error.message;
+      return apiMessage || "Login failed. Check credentials and try again.";
+    }
+    return "Login failed. Check credentials and try again.";
+  })();
 
   return (
     <div className="mx-auto mt-20 max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -45,9 +59,7 @@ export default function LoginPage() {
           {loginMutation.isPending ? "Signing in..." : "Sign in"}
         </button>
       </form>
-      {loginMutation.error && (
-        <p className="mt-3 text-sm text-red-600">Login failed. Check credentials and try again.</p>
-      )}
+      {loginMutation.error && <p className="mt-3 text-sm text-red-600">{loginErrorMessage}</p>}
     </div>
   );
 }

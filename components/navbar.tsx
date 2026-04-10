@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import { signOut } from "@/lib/api";
+import { isAdminUser } from "@/lib/auth-user";
 import { useAuth } from "@/lib/hooks/use-auth";
 
 export function Navbar() {
@@ -28,15 +29,15 @@ export function Navbar() {
           <Link href="/dashboard" className="text-sm font-semibold text-blue-600">
             PDF Manager
           </Link>
-          <nav className="hidden items-center gap-4 text-sm text-slate-600 sm:flex">
+          <nav className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
             <Link href="/dashboard" className="hover:text-slate-900">
               Dashboard
             </Link>
             <Link href="/search" className="hover:text-slate-900">
               Search
             </Link>
-            {user?.role === "ADMIN" && (
-              <Link href="/admin" className="hover:text-slate-900">
+            {isAdminUser(user) && (
+              <Link href="/admin" className="font-medium text-blue-700 hover:text-blue-900">
                 Admin
               </Link>
             )}
