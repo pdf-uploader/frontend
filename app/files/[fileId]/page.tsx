@@ -1,13 +1,18 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { useParams, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { PDFViewer } from "@/components/pdf-viewer";
 import { api } from "@/lib/api";
 import { FileDetails } from "@/lib/types";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
+
+const PDFViewer = dynamic(() => import("@/components/pdf-viewer").then((mod) => mod.PDFViewer), {
+  ssr: false,
+  loading: () => <p className="text-sm text-slate-600">Loading PDF viewer...</p>,
+});
 
 export default function FileViewerPage() {
   const params = useParams<{ fileId: string }>();
@@ -16,6 +21,7 @@ export default function FileViewerPage() {
   const keyword = searchParams.get("keyword") ?? "";
   const page = Number(searchParams.get("page") ?? "1");
   const initialPage = Number.isFinite(page) && page > 0 ? page : 1;
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
   const fileQuery = useQuery({
     queryKey: ["file", fileId],
@@ -23,21 +29,63 @@ export default function FileViewerPage() {
     enabled: Boolean(fileId),
   });
 
-  const safeUrl = useMemo(() => fileQuery.data?.fileUrl ?? "", [fileQuery.data?.fileUrl]);
+  const pdfBlobQuery = useQuery({
+    queryKey: ["file-pdf", fileId],
+    queryFn: async () => (await api.get<Blob>(`/files/pdf/${fileId}`, { responseType: "blob" })).data,
+    enabled: Boolean(fileId),
+  });
 
-  if (fileQuery.isLoading) {
+  useEffect(() => {
+    if (!pdfBlobQuery.data) {
+      setBlobUrl(null);
+      return;
+    }
+
+    const url = URL.createObjectURL(pdfBlobQuery.data);
+    setBlobUrl(url);
+
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [pdfBlobQuery.data]);
+
+  const displayFilename = useMemo(
+    () => fileQuery.data?.filename || `file-${fileId}.pdf`,
+    [fileQuery.data?.filename, fileId]
+  );
+
+  if (fileQuery.isLoading || pdfBlobQuery.isLoading) {
     return <p className="text-sm text-slate-600">Loading file...</p>;
   }
 
-  if (fileQuery.error || !fileQuery.data) {
+  if (fileQuery.error || pdfBlobQuery.error || !fileQuery.data || !pdfBlobQuery.data) {
     return <p className="text-sm text-red-600">Unable to load file details.</p>;
   }
+
+  const onDownload = () => {
+    const downloadUrl = URL.createObjectURL(pdfBlobQuery.data);
+    const anchor = document.createElement("a");
+    anchor.href = downloadUrl;
+    anchor.download = displayFilename.endsWith(".pdf") ? displayFilename : `${displayFilename}.pdf`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(downloadUrl);
+  };
 
   return (
     <section className="grid gap-4 lg:grid-cols-[1fr_280px]">
       <div className="min-h-[70vh] rounded-xl border border-slate-200 bg-slate-100 p-4">
-        <h1 className="mb-4 text-lg font-semibold">{fileQuery.data.filename}</h1>
-        <PDFViewer fileUrl={safeUrl} initialPage={initialPage} keyword={keyword} />
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h1 className="text-lg font-semibold">{displayFilename}</h1>
+          <button
+            onClick={onDownload}
+            className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700"
+          >
+            Download PDF
+          </button>
+        </div>
+        {blobUrl && <PDFViewer fileUrl={blobUrl} initialPage={initialPage} keyword={keyword} />}
       </div>
       <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold">Search Context</h2>

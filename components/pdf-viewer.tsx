@@ -20,18 +20,37 @@ export function PDFViewer({ fileUrl, initialPage = 1, keyword = "" }: PDFViewerP
   const normalizedKeyword = keyword.trim().toLowerCase();
 
   useEffect(() => {
+    // Start the render window from the requested page so deep links land exactly.
     setRenderWindow({
-      start: Math.max(1, initialPage - 2),
-      end: Math.max(WINDOW_SIZE, initialPage + 5),
+      start: Math.max(1, initialPage),
+      end: Math.max(WINDOW_SIZE, initialPage + WINDOW_SIZE - 1),
     });
+    pageRefs.current.clear();
   }, [initialPage]);
 
   useEffect(() => {
-    const pageElement = pageRefs.current.get(initialPage);
-    if (pageElement) {
-      pageElement.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (initialPage < renderWindow.start || initialPage > renderWindow.end) {
+      return;
     }
-  }, [renderWindow, initialPage]);
+
+    let attempts = 0;
+    let rafId = 0;
+
+    const tryScroll = () => {
+      const pageElement = pageRefs.current.get(initialPage);
+      if (pageElement) {
+        pageElement.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      attempts += 1;
+      if (attempts < 12) {
+        rafId = window.requestAnimationFrame(tryScroll);
+      }
+    };
+
+    rafId = window.requestAnimationFrame(tryScroll);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [initialPage, renderWindow.start, renderWindow.end, numPages]);
 
   const pagesToRender = useMemo(() => {
     if (!numPages) {

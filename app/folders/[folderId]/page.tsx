@@ -37,7 +37,7 @@ export default function FolderPage() {
 
   return (
     <section className="space-y-4">
-      <h1 className="text-2xl font-semibold">{folderQuery.data.name}</h1>
+      <h1 className="text-2xl font-semibold">{folderQuery.data.foldername}</h1>
       <FileList files={folderQuery.data.files} />
     </section>
   );

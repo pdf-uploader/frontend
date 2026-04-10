@@ -8,14 +8,34 @@ import { SearchResultItem } from "@/components/search-result-item";
 import { api } from "@/lib/api";
 import { SearchResult } from "@/lib/types";
 
+interface FindApiItem {
+  id: string;
+  filename: string;
+  content?: Array<{
+    page: number;
+    content: string;
+  }>;
+}
+
 export default function SearchPage() {
   const [keyword, setKeyword] = useState("");
   const [debouncedKeyword] = useDebounce(keyword, 400);
 
   const searchQuery = useQuery({
     queryKey: ["search", debouncedKeyword],
-    queryFn: async () =>
-      (await api.get<SearchResult[]>("/files/find", { params: { keyword: debouncedKeyword } })).data,
+    queryFn: async () => {
+      const response = await api.get<FindApiItem[]>("/files/find", { params: { keyword: debouncedKeyword } });
+      const flattened: SearchResult[] = response.data.flatMap((file) =>
+        (file.content ?? []).map((match, index) => ({
+          id: `${file.id}-${match.page}-${index}`,
+          fileId: file.id,
+          filename: file.filename,
+          page: Math.max(1, match.page + 1),
+          snippet: match.content,
+        }))
+      );
+      return flattened;
+    },
     enabled: debouncedKeyword.trim().length > 0,
   });
 
