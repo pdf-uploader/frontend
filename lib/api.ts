@@ -3,7 +3,7 @@ import { authUserFromAccessToken, normalizeAuthUser } from "@/lib/auth-user";
 import { authStore } from "@/lib/auth-store";
 import { SignInResponse } from "@/lib/types";
 
-const API_BASE_URL = "http://localhost:4000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_EXPRESS_SERVER_URL ?? "http://localhost:4000";
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
