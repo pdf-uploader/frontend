@@ -9,48 +9,95 @@ interface PDFViewerProps {
   fileUrl: string;
   initialPage?: number;
   keyword?: string;
+  onCurrentPageChange?: (page: number) => void;
 }
 
 const WINDOW_SIZE = 8;
 
-export function PDFViewer({ fileUrl, initialPage = 1, keyword = "" }: PDFViewerProps) {
+export function PDFViewer({ fileUrl, initialPage = 1, keyword = "", onCurrentPageChange }: PDFViewerProps) {
   const [numPages, setNumPages] = useState(0);
-  const [renderWindow, setRenderWindow] = useState({ start: 1, end: WINDOW_SIZE });
+  const [renderWindow, setRenderWindow] = useState({
+    start: Math.max(1, initialPage - 1),
+    end: Math.max(WINDOW_SIZE, initialPage + WINDOW_SIZE - 1),
+  });
+  const [jumpCompleted, setJumpCompleted] = useState(initialPage === 1);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const topSentinelRef = useRef<HTMLDivElement | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const hasJumpedRef = useRef(false);
+  const pageObserverRef = useRef<IntersectionObserver | null>(null);
   const normalizedKeyword = keyword.trim().toLowerCase();
 
   useEffect(() => {
-    // Start the render window from the requested page so deep links land exactly.
+    // Render around the target page first for reliable teleport.
     setRenderWindow({
-      start: Math.max(1, initialPage),
+      start: Math.max(1, initialPage - 1),
       end: Math.max(WINDOW_SIZE, initialPage + WINDOW_SIZE - 1),
     });
-    pageRefs.current.clear();
+    hasJumpedRef.current = false;
+    setJumpCompleted(initialPage === 1);
   }, [initialPage]);
 
   useEffect(() => {
-    if (initialPage < renderWindow.start || initialPage > renderWindow.end) {
+    if (initialPage < renderWindow.start || initialPage > renderWindow.end || hasJumpedRef.current) {
       return;
     }
 
     let attempts = 0;
-    let rafId = 0;
+    let timerId: number | null = null;
+    const MAX_ATTEMPTS = 120;
 
     const tryScroll = () => {
       const pageElement = pageRefs.current.get(initialPage);
       if (pageElement) {
-        pageElement.scrollIntoView({ behavior: "smooth", block: "start" });
+        pageElement.scrollIntoView({ behavior: "auto", block: "start" });
+        hasJumpedRef.current = true;
+        setJumpCompleted(true);
         return;
       }
       attempts += 1;
-      if (attempts < 12) {
-        rafId = window.requestAnimationFrame(tryScroll);
+      if (attempts < MAX_ATTEMPTS) {
+        // Rendering many pages can take time; keep trying until target page mounts.
+        timerId = window.setTimeout(tryScroll, 75);
       }
     };
 
-    rafId = window.requestAnimationFrame(tryScroll);
-    return () => window.cancelAnimationFrame(rafId);
+    timerId = window.setTimeout(tryScroll, 0);
+    return () => {
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
   }, [initialPage, renderWindow.start, renderWindow.end, numPages]);
+
+  useEffect(() => {
+    if (pageObserverRef.current) {
+      pageObserverRef.current.disconnect();
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .map((entry) => ({
+            page: Number((entry.target as HTMLElement).dataset.pageNumber ?? "0"),
+            ratio: entry.intersectionRatio,
+          }))
+          .filter((entry) => entry.page > 0)
+          .sort((a, b) => b.ratio - a.ratio);
+
+        if (visible.length && onCurrentPageChange) {
+          onCurrentPageChange(visible[0].page);
+        }
+      },
+      { threshold: [0.25, 0.5, 0.75] }
+    );
+
+    pageRefs.current.forEach((element) => observer.observe(element));
+    pageObserverRef.current = observer;
+
+    return () => observer.disconnect();
+  }, [onCurrentPageChange, renderWindow.start, renderWindow.end, numPages]);
 
   const pagesToRender = useMemo(() => {
     if (!numPages) {
@@ -63,14 +110,60 @@ export function PDFViewer({ fileUrl, initialPage = 1, keyword = "" }: PDFViewerP
     return list;
   }, [numPages, renderWindow]);
 
+  useEffect(() => {
+    if (!numPages || !jumpCompleted || !topSentinelRef.current || !sentinelRef.current) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          if (entry.target === topSentinelRef.current) {
+            setRenderWindow((prev) => {
+              if (prev.start <= 1) {
+                return prev;
+              }
+              return {
+                start: Math.max(1, prev.start - WINDOW_SIZE),
+                end: prev.end,
+              };
+            });
+          }
+
+          if (entry.target === sentinelRef.current) {
+            setRenderWindow((prev) => {
+              if (prev.end >= numPages) {
+                return prev;
+              }
+              return {
+                start: prev.start,
+                end: Math.min(numPages, prev.end + WINDOW_SIZE),
+              };
+            });
+          }
+        });
+      },
+      { root: null, rootMargin: "400px", threshold: 0.1 }
+    );
+
+    observer.observe(topSentinelRef.current);
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [numPages, renderWindow.start, renderWindow.end, jumpCompleted]);
+
   return (
     <div className="space-y-3">
+      {renderWindow.start > 1 && <div ref={topSentinelRef} className="h-8 w-full" />}
       <Document file={fileUrl} onLoadSuccess={({ numPages: pages }) => setNumPages(pages)} loading={<p>Loading PDF...</p>}>
         {pagesToRender.map((pageNumber) => (
           <div
             key={pageNumber}
             ref={(element) => {
-              if (element) pageRefs.current.set(pageNumber, element);
+              if (element) {
+                element.dataset.pageNumber = String(pageNumber);
+                pageRefs.current.set(pageNumber, element);
+              }
             }}
             className="rounded-lg border border-slate-200 bg-white p-2"
           >
@@ -98,19 +191,7 @@ export function PDFViewer({ fileUrl, initialPage = 1, keyword = "" }: PDFViewerP
         ))}
       </Document>
 
-      {numPages > renderWindow.end && (
-        <button
-          onClick={() =>
-            setRenderWindow((prev) => ({
-              start: prev.start,
-              end: Math.min(numPages, prev.end + WINDOW_SIZE),
-            }))
-          }
-          className="rounded-md bg-slate-900 px-3 py-2 text-xs text-white hover:bg-slate-700"
-        >
-          Load more pages
-        </button>
-      )}
+      {numPages > renderWindow.end && <div ref={sentinelRef} className="h-8 w-full" />}
     </div>
   );
 }

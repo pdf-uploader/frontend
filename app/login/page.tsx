@@ -13,7 +13,7 @@ export default function LoginPage() {
 
   const loginMutation = useMutation({
     mutationFn: async () => signIn(email, password),
-    onSuccess: () => router.replace("/dashboard"),
+    onSuccess: () => router.replace("/"),
   });
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {

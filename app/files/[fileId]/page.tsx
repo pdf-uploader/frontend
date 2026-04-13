@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -21,6 +22,7 @@ export default function FileViewerPage() {
   const keyword = searchParams.get("keyword") ?? "";
   const page = Number(searchParams.get("page") ?? "1");
   const initialPage = Number.isFinite(page) && page > 0 ? page : 1;
+  const [currentPage, setCurrentPage] = useState(initialPage);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
   const fileQuery = useQuery({
@@ -48,6 +50,10 @@ export default function FileViewerPage() {
       URL.revokeObjectURL(url);
     };
   }, [pdfBlobQuery.data]);
+
+  useEffect(() => {
+    setCurrentPage(initialPage);
+  }, [initialPage]);
 
   const displayFilename = useMemo(
     () => fileQuery.data?.filename || `file-${fileId}.pdf`,
@@ -77,20 +83,37 @@ export default function FileViewerPage() {
     <section className="grid gap-4 lg:grid-cols-[1fr_280px]">
       <div className="min-h-[70vh] rounded-xl border border-slate-200 bg-slate-100 p-4">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h1 className="text-lg font-semibold">{displayFilename}</h1>
-          <button
-            onClick={onDownload}
-            className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700"
-          >
-            Download PDF
-          </button>
+          <div className="space-y-1">
+            <Link href="/" className="inline-flex text-xs font-medium text-blue-700 hover:underline">
+              ← Back to library
+            </Link>
+            <h1 className="text-lg font-semibold">{displayFilename}</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onDownload}
+              className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700"
+            >
+              Download PDF
+            </button>
+          </div>
         </div>
-        {blobUrl && <PDFViewer fileUrl={blobUrl} initialPage={initialPage} keyword={keyword} />}
+        {blobUrl && (
+          <PDFViewer
+            fileUrl={blobUrl}
+            initialPage={initialPage}
+            keyword={keyword}
+            onCurrentPageChange={setCurrentPage}
+          />
+        )}
       </div>
       <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold">Search Context</h2>
         <p className="text-sm text-slate-600">
           Jumped to page <span className="font-medium">{initialPage}</span>
+        </p>
+        <p className="text-sm text-slate-600">
+          Current page <span className="rounded bg-blue-50 px-2 py-0.5 font-medium text-blue-700">{currentPage}</span>
         </p>
         {keyword && (
           <p className="rounded bg-yellow-50 px-2 py-1 text-xs text-slate-700">
