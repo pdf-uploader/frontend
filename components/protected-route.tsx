@@ -18,7 +18,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
       router.replace("/login");
     }
     if (token && pathname === "/login") {
-      router.replace("/dashboard");
+      router.replace("/");
     }
   }, [token, isPublic, pathname, router]);
 

@@ -26,19 +26,16 @@ export function Navbar() {
     <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-5">
-          <Link href="/dashboard" className="text-sm font-semibold text-blue-600">
+          <Link href="/" className="text-sm font-semibold text-blue-600">
             PDF Manager
           </Link>
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
-            <Link href="/dashboard" className="hover:text-slate-900">
-              Dashboard
-            </Link>
-            <Link href="/search" className="hover:text-slate-900">
-              Search
+            <Link href="/" className="hover:text-slate-900">
+              Library
             </Link>
             {isAdminUser(user) && (
-              <Link href="/admin" className="font-medium text-blue-700 hover:text-blue-900">
-                Admin
+              <Link href="/users" className="font-medium text-blue-700 hover:text-blue-900">
+                Users
               </Link>
             )}
           </nav>
