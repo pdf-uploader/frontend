@@ -7,193 +7,292 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 
 interface PDFViewerProps {
   fileUrl: string;
-  initialPage?: number;
+  activePage?: number;
   keyword?: string;
   onCurrentPageChange?: (page: number) => void;
+  onNumPagesChange?: (total: number) => void;
+  bookmarkedPages?: number[];
 }
 
-const WINDOW_SIZE = 8;
-
-export function PDFViewer({ fileUrl, initialPage = 1, keyword = "", onCurrentPageChange }: PDFViewerProps) {
+export function PDFViewer({
+  fileUrl,
+  activePage = 1,
+  keyword = "",
+  onCurrentPageChange,
+  onNumPagesChange,
+  bookmarkedPages = [],
+}: PDFViewerProps) {
+  const BOOK_PAGE_WIDTH = 520;
+  const BOOK_VIEWPORT_HEIGHT = 760;
   const [numPages, setNumPages] = useState(0);
-  const [renderWindow, setRenderWindow] = useState({
-    start: Math.max(1, initialPage - 1),
-    end: Math.max(WINDOW_SIZE, initialPage + WINDOW_SIZE - 1),
-  });
-  const [jumpCompleted, setJumpCompleted] = useState(initialPage === 1);
-  const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const topSentinelRef = useRef<HTMLDivElement | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const hasJumpedRef = useRef(false);
-  const pageObserverRef = useRef<IntersectionObserver | null>(null);
+  const [spreadStart, setSpreadStart] = useState(toSpreadStart(activePage));
+  const [flipDirection, setFlipDirection] = useState<"next" | "prev" | null>(null);
+  const flipTimerRef = useRef<number | null>(null);
   const normalizedKeyword = keyword.trim().toLowerCase();
+  const bookmarkedSet = useMemo(() => new Set(bookmarkedPages), [bookmarkedPages]);
+  const leftPage = spreadStart;
+  const rightPage = spreadStart + 1 <= numPages ? spreadStart + 1 : null;
+  const FLIP_DURATION = 460;
 
   useEffect(() => {
-    // Render around the target page first for reliable teleport.
-    setRenderWindow({
-      start: Math.max(1, initialPage - 1),
-      end: Math.max(WINDOW_SIZE, initialPage + WINDOW_SIZE - 1),
-    });
-    hasJumpedRef.current = false;
-    setJumpCompleted(initialPage === 1);
-  }, [initialPage]);
-
-  useEffect(() => {
-    if (initialPage < renderWindow.start || initialPage > renderWindow.end || hasJumpedRef.current) {
-      return;
-    }
-
-    let attempts = 0;
-    let timerId: number | null = null;
-    const MAX_ATTEMPTS = 120;
-
-    const tryScroll = () => {
-      const pageElement = pageRefs.current.get(initialPage);
-      if (pageElement) {
-        pageElement.scrollIntoView({ behavior: "auto", block: "start" });
-        hasJumpedRef.current = true;
-        setJumpCompleted(true);
-        return;
-      }
-      attempts += 1;
-      if (attempts < MAX_ATTEMPTS) {
-        // Rendering many pages can take time; keep trying until target page mounts.
-        timerId = window.setTimeout(tryScroll, 75);
-      }
-    };
-
-    timerId = window.setTimeout(tryScroll, 0);
-    return () => {
-      if (timerId !== null) {
-        window.clearTimeout(timerId);
-      }
-    };
-  }, [initialPage, renderWindow.start, renderWindow.end, numPages]);
-
-  useEffect(() => {
-    if (pageObserverRef.current) {
-      pageObserverRef.current.disconnect();
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .map((entry) => ({
-            page: Number((entry.target as HTMLElement).dataset.pageNumber ?? "0"),
-            ratio: entry.intersectionRatio,
-          }))
-          .filter((entry) => entry.page > 0)
-          .sort((a, b) => b.ratio - a.ratio);
-
-        if (visible.length && onCurrentPageChange) {
-          onCurrentPageChange(visible[0].page);
-        }
-      },
-      { threshold: [0.25, 0.5, 0.75] }
-    );
-
-    pageRefs.current.forEach((element) => observer.observe(element));
-    pageObserverRef.current = observer;
-
-    return () => observer.disconnect();
-  }, [onCurrentPageChange, renderWindow.start, renderWindow.end, numPages]);
-
-  const pagesToRender = useMemo(() => {
     if (!numPages) {
-      return [];
-    }
-    const list: number[] = [];
-    for (let i = renderWindow.start; i <= Math.min(renderWindow.end, numPages); i += 1) {
-      list.push(i);
-    }
-    return list;
-  }, [numPages, renderWindow]);
-
-  useEffect(() => {
-    if (!numPages || !jumpCompleted || !topSentinelRef.current || !sentinelRef.current) {
       return;
     }
+    const normalizedPage = clampPage(activePage, numPages);
+    setSpreadStart(toSpreadStart(normalizedPage));
+  }, [activePage, numPages]);
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) return;
-          if (entry.target === topSentinelRef.current) {
-            setRenderWindow((prev) => {
-              if (prev.start <= 1) {
-                return prev;
-              }
-              return {
-                start: Math.max(1, prev.start - WINDOW_SIZE),
-                end: prev.end,
-              };
-            });
-          }
+  useEffect(() => {
+    if (!onCurrentPageChange) {
+      return;
+    }
+    onCurrentPageChange(spreadStart);
+  }, [spreadStart, onCurrentPageChange]);
 
-          if (entry.target === sentinelRef.current) {
-            setRenderWindow((prev) => {
-              if (prev.end >= numPages) {
-                return prev;
-              }
-              return {
-                start: prev.start,
-                end: Math.min(numPages, prev.end + WINDOW_SIZE),
-              };
-            });
-          }
-        });
-      },
-      { root: null, rootMargin: "400px", threshold: 0.1 }
-    );
+  useEffect(() => {
+    return () => {
+      if (flipTimerRef.current !== null) {
+        window.clearTimeout(flipTimerRef.current);
+      }
+    };
+  }, []);
 
-    observer.observe(topSentinelRef.current);
-    observer.observe(sentinelRef.current);
-    return () => observer.disconnect();
-  }, [numPages, renderWindow.start, renderWindow.end, jumpCompleted]);
+  const canFlipNext = rightPage !== null && rightPage < numPages;
+  const canFlipPrev = leftPage > 1;
+
+  const goToNextSpread = () => {
+    if (!canFlipNext || flipDirection) {
+      return;
+    }
+    setFlipDirection("next");
+    flipTimerRef.current = window.setTimeout(() => {
+      setSpreadStart((prev) => Math.min(Math.max(1, prev + 2), Math.max(1, numPages - (numPages % 2 === 0 ? 1 : 0))));
+      setFlipDirection(null);
+    }, FLIP_DURATION);
+  };
+
+  const goToPrevSpread = () => {
+    if (!canFlipPrev || flipDirection) {
+      return;
+    }
+    setFlipDirection("prev");
+    flipTimerRef.current = window.setTimeout(() => {
+      setSpreadStart((prev) => Math.max(1, prev - 2));
+      setFlipDirection(null);
+    }, FLIP_DURATION);
+  };
 
   return (
-    <div className="space-y-3">
-      {renderWindow.start > 1 && <div ref={topSentinelRef} className="h-8 w-full" />}
-      <Document file={fileUrl} onLoadSuccess={({ numPages: pages }) => setNumPages(pages)} loading={<p>Loading PDF...</p>}>
-        {pagesToRender.map((pageNumber) => (
-          <div
-            key={pageNumber}
-            ref={(element) => {
-              if (element) {
-                element.dataset.pageNumber = String(pageNumber);
-                pageRefs.current.set(pageNumber, element);
-              }
-            }}
-            className="rounded-lg border border-slate-200 bg-white p-2"
-          >
-            <p className="mb-2 text-xs text-slate-500">Page {pageNumber}</p>
-            <Page
-              pageNumber={pageNumber}
-              width={860}
-              renderAnnotationLayer={false}
-              renderTextLayer
-              customTextRenderer={({ str }) => {
-                if (!normalizedKeyword) {
-                  return str;
-                }
-
-                const lower = str.toLowerCase();
-                if (!lower.includes(normalizedKeyword)) {
-                  return str;
-                }
-
-                const regex = new RegExp(`(${escapeRegExp(normalizedKeyword)})`, "gi");
-                return str.replace(regex, '<mark style="background:#fde68a;padding:0 2px;">$1</mark>');
-              }}
+    <Document
+      file={fileUrl}
+      onLoadSuccess={({ numPages: pages }) => {
+        setNumPages(pages);
+        onNumPagesChange?.(pages);
+      }}
+      loading={<p className="text-sm text-slate-600">Loading PDF...</p>}
+      className="space-y-4"
+    >
+      <div
+        className="relative mx-auto h-[760px] max-w-[1120px] overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 shadow-inner"
+        onWheel={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (Math.abs(event.deltaY) < 8 || flipDirection) {
+            return;
+          }
+          if (event.deltaY > 0) {
+            goToNextSpread();
+          } else {
+            goToPrevSpread();
+          }
+        }}
+      >
+        <div className="pointer-events-none absolute inset-y-4 left-1/2 w-px -translate-x-1/2 bg-slate-300/70" />
+        <div className="pointer-events-none absolute inset-y-4 left-1/2 w-10 -translate-x-1/2 bg-gradient-to-r from-slate-300/25 via-slate-400/30 to-slate-300/25 blur-lg" />
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <BookPage
+            pageNumber={leftPage}
+            isBookmarked={bookmarkedSet.has(leftPage)}
+            normalizedKeyword={normalizedKeyword}
+            pageWidth={BOOK_PAGE_WIDTH}
+            pageViewportHeight={BOOK_VIEWPORT_HEIGHT}
+            onNavigatePrev={goToPrevSpread}
+            onNavigateNext={goToNextSpread}
+          />
+          {rightPage ? (
+            <BookPage
+              pageNumber={rightPage}
+              isBookmarked={bookmarkedSet.has(rightPage)}
+              normalizedKeyword={normalizedKeyword}
+              pageWidth={BOOK_PAGE_WIDTH}
+              pageViewportHeight={BOOK_VIEWPORT_HEIGHT}
+              onNavigatePrev={goToPrevSpread}
+              onNavigateNext={goToNextSpread}
+              isRightPage
             />
-          </div>
-        ))}
-      </Document>
+          ) : (
+            <div className="hidden rounded-xl border border-dashed border-slate-300 bg-white/70 lg:block" />
+          )}
+        </div>
 
-      {numPages > renderWindow.end && <div ref={sentinelRef} className="h-8 w-full" />}
+        {flipDirection && (
+          <div
+            className={[
+              "pointer-events-none absolute top-4 hidden h-[calc(100%-2rem)] w-[calc(50%-1rem)] overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl lg:block",
+              flipDirection === "next"
+                ? "right-4 origin-left animate-[bookFlipNext_460ms_ease-in-out_forwards]"
+                : "left-4 origin-right animate-[bookFlipPrev_460ms_ease-in-out_forwards]",
+            ].join(" ")}
+          >
+            <div className="absolute inset-0 bg-gradient-to-r from-slate-100 via-white to-slate-100" />
+            <div className="absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-slate-500/20 to-transparent" />
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={goToPrevSpread}
+          disabled={!canFlipPrev || Boolean(flipDirection)}
+          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Previous spread
+        </button>
+        <p className="text-xs text-slate-500">Scroll or click left/right page edges to flip</p>
+        <button
+          type="button"
+          onClick={goToNextSpread}
+          disabled={!canFlipNext || Boolean(flipDirection)}
+          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Next spread
+        </button>
+      </div>
+
+      <style jsx global>{`
+        @keyframes bookFlipNext {
+          0% {
+            transform: perspective(1800px) rotateY(0deg);
+            opacity: 1;
+          }
+          55% {
+            opacity: 0.96;
+          }
+          100% {
+            transform: perspective(1800px) rotateY(-180deg);
+            opacity: 0.72;
+          }
+        }
+
+        @keyframes bookFlipPrev {
+          0% {
+            transform: perspective(1800px) rotateY(0deg);
+            opacity: 1;
+          }
+          55% {
+            opacity: 0.96;
+          }
+          100% {
+            transform: perspective(1800px) rotateY(180deg);
+            opacity: 0.72;
+          }
+        }
+      `}</style>
+    </Document>
+  );
+}
+
+interface BookPageProps {
+  pageNumber: number;
+  normalizedKeyword: string;
+  isBookmarked: boolean;
+  pageWidth: number;
+  pageViewportHeight: number;
+  isRightPage?: boolean;
+  onNavigateNext: () => void;
+  onNavigatePrev: () => void;
+}
+
+function BookPage({
+  pageNumber,
+  normalizedKeyword,
+  isBookmarked,
+  pageWidth,
+  pageViewportHeight,
+  isRightPage = false,
+  onNavigateNext,
+  onNavigatePrev,
+}: BookPageProps) {
+  return (
+    <div
+      className={[
+        "group relative overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-sm transition hover:shadow-md",
+        isRightPage ? "cursor-e-resize" : "cursor-w-resize",
+      ].join(" ")}
+      onClick={isRightPage ? onNavigateNext : onNavigatePrev}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          if (isRightPage) {
+            onNavigateNext();
+          } else {
+            onNavigatePrev();
+          }
+        }
+      }}
+    >
+      {isBookmarked && <BookmarkRibbon />}
+      <p className="mb-2 px-1 text-xs font-medium text-slate-500">Page {pageNumber}</p>
+      <div className="flex h-[700px] items-start justify-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">
+        <Page
+          pageNumber={pageNumber}
+          width={pageWidth}
+          height={pageViewportHeight}
+          renderAnnotationLayer={false}
+          renderTextLayer
+          customTextRenderer={({ str }) => {
+            if (!normalizedKeyword) {
+              return str;
+            }
+
+            const lower = str.toLowerCase();
+            if (!lower.includes(normalizedKeyword)) {
+              return str;
+            }
+
+            const regex = new RegExp(`(${escapeRegExp(normalizedKeyword)})`, "gi");
+            return str.replace(regex, '<mark style="background:#fde68a;padding:0 2px;">$1</mark>');
+          }}
+        />
+      </div>
+      <div
+        className={[
+          "pointer-events-none absolute inset-y-0 w-14 bg-gradient-to-r opacity-0 transition group-hover:opacity-100",
+          isRightPage ? "right-0 from-transparent to-slate-300/30" : "left-0 from-slate-300/30 to-transparent",
+        ].join(" ")}
+      />
     </div>
   );
+}
+
+function BookmarkRibbon() {
+  return (
+    <div
+      className="pointer-events-none absolute left-1/2 top-0 z-10 h-12 w-5 -translate-x-1/2 bg-fuchsia-500 shadow-md"
+      style={{ clipPath: "polygon(0 0,100% 0,100% 76%,50% 100%,0 76%)" }}
+    />
+  );
+}
+
+function clampPage(page: number, numPages: number): number {
+  return Math.min(Math.max(1, page), Math.max(1, numPages));
+}
+
+function toSpreadStart(page: number): number {
+  return page % 2 === 0 ? Math.max(1, page - 1) : Math.max(1, page);
 }
 
 function escapeRegExp(value: string): string {

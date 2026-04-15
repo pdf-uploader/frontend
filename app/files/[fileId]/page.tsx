@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
 import { api } from "@/lib/api";
 import { FileDetails } from "@/lib/types";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -23,6 +24,8 @@ export default function FileViewerPage() {
   const page = Number(searchParams.get("page") ?? "1");
   const initialPage = Number.isFinite(page) && page > 0 ? page : 1;
   const [currentPage, setCurrentPage] = useState(initialPage);
+  const [totalPages, setTotalPages] = useState(0);
+  const [bookmarkedPages, setBookmarkedPages] = useState<number[]>([]);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
   const fileQuery = useQuery({
@@ -55,6 +58,32 @@ export default function FileViewerPage() {
     setCurrentPage(initialPage);
   }, [initialPage]);
 
+  useEffect(() => {
+    const bookmarkKey = getBookmarkStorageKey(fileId);
+    const rawBookmarks = window.localStorage.getItem(bookmarkKey);
+    if (!rawBookmarks) {
+      setBookmarkedPages([]);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(rawBookmarks);
+      if (!Array.isArray(parsed)) {
+        setBookmarkedPages([]);
+        return;
+      }
+      const normalized = parsed
+        .filter((item): item is number => typeof item === "number" && Number.isFinite(item) && item > 0)
+        .sort((a, b) => a - b);
+      setBookmarkedPages(Array.from(new Set(normalized)));
+    } catch {
+      setBookmarkedPages([]);
+    }
+  }, [fileId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(getBookmarkStorageKey(fileId), JSON.stringify(bookmarkedPages));
+  }, [bookmarkedPages, fileId]);
+
   const displayFilename = useMemo(
     () => fileQuery.data?.filename || `file-${fileId}.pdf`,
     [fileQuery.data?.filename, fileId]
@@ -65,7 +94,30 @@ export default function FileViewerPage() {
   }
 
   if (fileQuery.error || pdfBlobQuery.error || !fileQuery.data || !pdfBlobQuery.data) {
-    return <p className="text-sm text-red-600">Unable to load file details.</p>;
+    const backendError = extractBackendError(fileQuery.error ?? pdfBlobQuery.error);
+    return (
+      <section className="mx-auto max-w-3xl rounded-3xl border border-rose-200 bg-gradient-to-br from-rose-50 via-white to-orange-50 p-7 shadow-sm">
+        <p className="mb-2 inline-flex rounded-full border border-rose-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-rose-700">
+          Unable to open PDF
+        </p>
+        <h1 className="text-xl font-semibold text-slate-900">File viewer failed to load</h1>
+        <p className="mt-3 rounded-xl border border-rose-100 bg-white/80 p-4 text-sm leading-6 text-slate-700">
+          {backendError || "The backend did not return a readable error message. Please try again."}
+        </p>
+        <div className="mt-5 flex items-center gap-3">
+          <Link href="/" className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-700">
+            Back to library
+          </Link>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Retry
+          </button>
+        </div>
+      </section>
+    );
   }
 
   const onDownload = () => {
@@ -79,9 +131,20 @@ export default function FileViewerPage() {
     URL.revokeObjectURL(downloadUrl);
   };
 
+  const toggleBookmark = (page: number) => {
+    setBookmarkedPages((prev) => {
+      if (prev.includes(page)) {
+        return prev.filter((item) => item !== page);
+      }
+      return [...prev, page].sort((a, b) => a - b);
+    });
+  };
+
+  const isCurrentPageBookmarked = bookmarkedPages.includes(currentPage);
+
   return (
-    <section className="grid gap-4 lg:grid-cols-[1fr_280px]">
-      <div className="min-h-[70vh] rounded-xl border border-slate-200 bg-slate-100 p-4">
+    <section className="space-y-4">
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="space-y-1">
             <Link href="/" className="inline-flex text-xs font-medium text-blue-700 hover:underline">
@@ -98,29 +161,95 @@ export default function FileViewerPage() {
             </button>
           </div>
         </div>
-        {blobUrl && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-gradient-to-r from-white to-slate-50 px-4 py-3">
+          <div className="flex items-center gap-3 text-sm">
+            <p className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
+              Page {currentPage} / {totalPages || "—"}
+            </p>
+            {keyword && (
+              <p className="rounded-full border border-yellow-200 bg-yellow-50 px-3 py-1 text-xs text-slate-700">
+                Keyword highlight: <span className="font-semibold">{keyword}</span>
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => toggleBookmark(currentPage)}
+              className={[
+                "rounded-lg px-3 py-2 text-xs font-semibold transition",
+                isCurrentPageBookmarked
+                  ? "bg-fuchsia-600 text-white hover:bg-fuchsia-500"
+                  : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+              ].join(" ")}
+            >
+              {isCurrentPageBookmarked ? "Remove bookmark" : "Bookmark this page"}
+            </button>
+          </div>
+        </div>
+
+        {bookmarkedPages.length > 0 && (
+          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Bookmarks</p>
+            <div className="flex flex-wrap gap-2">
+              {bookmarkedPages.map((page) => (
+                <button
+                  key={page}
+                  type="button"
+                  onClick={() => setCurrentPage(page)}
+                  className={[
+                    "rounded-full border px-3 py-1 text-xs font-medium transition",
+                    page === currentPage
+                      ? "border-fuchsia-300 bg-fuchsia-100 text-fuchsia-700"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+                  ].join(" ")}
+                >
+                  Page {page}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="min-h-[70vh] rounded-xl border border-slate-200 bg-slate-100 p-4">
+          {blobUrl && (
           <PDFViewer
             fileUrl={blobUrl}
-            initialPage={initialPage}
+            activePage={currentPage}
             keyword={keyword}
             onCurrentPageChange={setCurrentPage}
+            onNumPagesChange={setTotalPages}
+            bookmarkedPages={bookmarkedPages}
           />
-        )}
+          )}
+        </div>
       </div>
-      <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold">Search Context</h2>
-        <p className="text-sm text-slate-600">
-          Jumped to page <span className="font-medium">{initialPage}</span>
-        </p>
-        <p className="text-sm text-slate-600">
-          Current page <span className="rounded bg-blue-50 px-2 py-0.5 font-medium text-blue-700">{currentPage}</span>
-        </p>
-        {keyword && (
-          <p className="rounded bg-yellow-50 px-2 py-1 text-xs text-slate-700">
-            Highlight keyword: <span className="font-semibold">{keyword}</span>
-          </p>
-        )}
-      </aside>
     </section>
   );
+}
+
+function extractBackendError(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as { message?: string; error?: string } | string | undefined;
+    if (typeof data === "string" && data.trim()) {
+      return data;
+    }
+    if (data && typeof data === "object") {
+      if (typeof data.message === "string" && data.message.trim()) {
+        return data.message;
+      }
+      if (typeof data.error === "string" && data.error.trim()) {
+        return data.error;
+      }
+    }
+    return error.message || "Backend request failed.";
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "Unknown error.";
+}
+
+function getBookmarkStorageKey(fileId: string): string {
+  return `bookmarks:${fileId}`;
 }
