@@ -267,6 +267,7 @@ export default function FileViewerPage() {
               fileUrl={blobUrl}
               activePage={currentPage}
               keyword={keyword}
+              isFullscreen={isFullscreen}
               onCurrentPageChange={setCurrentPage}
               onNumPagesChange={setTotalPages}
               bookmarkedPages={bookmarkedPages}

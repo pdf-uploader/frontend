@@ -9,6 +9,7 @@ interface PDFViewerProps {
   fileUrl: string;
   activePage?: number;
   keyword?: string;
+  isFullscreen?: boolean;
   onCurrentPageChange?: (page: number) => void;
   onNumPagesChange?: (total: number) => void;
   bookmarkedPages?: number[];
@@ -18,6 +19,7 @@ export function PDFViewer({
   fileUrl,
   activePage = 1,
   keyword = "",
+  isFullscreen = false,
   onCurrentPageChange,
   onNumPagesChange,
   bookmarkedPages = [],
@@ -128,6 +130,32 @@ export function PDFViewer({
       setFlipDirection(null);
     }, FLIP_DURATION);
   };
+
+  useEffect(() => {
+    if (!isFullscreen) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (flipDirection) {
+        return;
+      }
+
+      // Volume key events are browser/device dependent, but supported when exposed.
+      if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === "AudioVolumeUp") {
+        event.preventDefault();
+        goToNextSpread();
+      }
+
+      if (event.key === "ArrowLeft" || event.key === "PageUp" || event.key === "AudioVolumeDown") {
+        event.preventDefault();
+        goToPrevSpread();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [flipDirection, goToNextSpread, goToPrevSpread, isFullscreen]);
 
   return (
     <Document
@@ -240,7 +268,9 @@ export function PDFViewer({
           {isMobileView ? "Previous page" : "Previous spread"}
         </button>
         <p className="text-xs text-slate-500">
-          {isMobileView ? "Swipe left/right or use buttons to navigate pages" : "Scroll or click left/right page edges to flip"}
+          {isMobileView
+            ? "Tap left/right side, swipe, or use buttons to navigate pages"
+            : "Scroll or click left/right page edges to flip"}
         </p>
         <button
           type="button"
@@ -386,8 +416,15 @@ function BookPage({
         "group relative overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-sm transition hover:shadow-md",
         isMobileView ? "cursor-default" : isRightPage ? "cursor-e-resize" : "cursor-w-resize",
       ].join(" ")}
-      onClick={() => {
+      onClick={(event) => {
         if (isMobileView) {
+          const rect = event.currentTarget.getBoundingClientRect();
+          const x = event.clientX - rect.left;
+          if (x < rect.width / 2) {
+            onNavigatePrev();
+          } else {
+            onNavigateNext();
+          }
           return;
         }
         if (isRightPage) {
