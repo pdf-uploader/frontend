@@ -22,32 +22,59 @@ export function PDFViewer({
   onNumPagesChange,
   bookmarkedPages = [],
 }: PDFViewerProps) {
+  const MOBILE_BREAKPOINT = 1024;
   const BOOK_PAGE_WIDTH = 520;
-  const BOOK_VIEWPORT_HEIGHT = 760;
+  const MOBILE_PAGE_MAX_WIDTH = 700;
   const [numPages, setNumPages] = useState(0);
-  const [spreadStart, setSpreadStart] = useState(toSpreadStart(activePage));
+  const [currentPage, setCurrentPage] = useState(activePage);
   const [flipDirection, setFlipDirection] = useState<"next" | "prev" | null>(null);
+  const [mobileTransition, setMobileTransition] = useState<{
+    from: number;
+    to: number;
+    direction: "next" | "prev";
+  } | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const flipTimerRef = useRef<number | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const normalizedKeyword = keyword.trim().toLowerCase();
   const bookmarkedSet = useMemo(() => new Set(bookmarkedPages), [bookmarkedPages]);
-  const leftPage = spreadStart;
-  const rightPage = spreadStart + 1 <= numPages ? spreadStart + 1 : null;
   const FLIP_DURATION = 460;
+  const isMobileView = viewportWidth > 0 && viewportWidth < MOBILE_BREAKPOINT;
+  const effectiveDesktopLeftPage = toSpreadStart(currentPage);
+  const leftPage = isMobileView ? currentPage : effectiveDesktopLeftPage;
+  const rightPage = !isMobileView && effectiveDesktopLeftPage + 1 <= numPages ? effectiveDesktopLeftPage + 1 : null;
+  const pageWidth = isMobileView
+    ? clampNumber(Math.floor(viewportWidth - 56), 240, MOBILE_PAGE_MAX_WIDTH)
+    : BOOK_PAGE_WIDTH;
 
   useEffect(() => {
     if (!numPages) {
       return;
     }
     const normalizedPage = clampPage(activePage, numPages);
-    setSpreadStart(toSpreadStart(normalizedPage));
+    setCurrentPage(normalizedPage);
   }, [activePage, numPages]);
 
   useEffect(() => {
     if (!onCurrentPageChange) {
       return;
     }
-    onCurrentPageChange(spreadStart);
-  }, [spreadStart, onCurrentPageChange]);
+    onCurrentPageChange(currentPage);
+  }, [currentPage, onCurrentPageChange]);
+
+  useEffect(() => {
+    const updateViewportWidth = () => {
+      if (!viewportRef.current) {
+        return;
+      }
+      setViewportWidth(viewportRef.current.clientWidth);
+    };
+
+    updateViewportWidth();
+    window.addEventListener("resize", updateViewportWidth);
+    return () => window.removeEventListener("resize", updateViewportWidth);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -57,16 +84,26 @@ export function PDFViewer({
     };
   }, []);
 
-  const canFlipNext = rightPage !== null && rightPage < numPages;
-  const canFlipPrev = leftPage > 1;
+  const canFlipNext = isMobileView ? currentPage < numPages : effectiveDesktopLeftPage + 2 <= numPages;
+  const canFlipPrev = isMobileView ? currentPage > 1 : effectiveDesktopLeftPage > 1;
 
   const goToNextSpread = () => {
     if (!canFlipNext || flipDirection) {
       return;
     }
     setFlipDirection("next");
+    if (isMobileView) {
+      const targetPage = Math.min(numPages, currentPage + 1);
+      setMobileTransition({ from: currentPage, to: targetPage, direction: "next" });
+      flipTimerRef.current = window.setTimeout(() => {
+        setCurrentPage(targetPage);
+        setMobileTransition(null);
+        setFlipDirection(null);
+      }, FLIP_DURATION);
+      return;
+    }
     flipTimerRef.current = window.setTimeout(() => {
-      setSpreadStart((prev) => Math.min(Math.max(1, prev + 2), Math.max(1, numPages - (numPages % 2 === 0 ? 1 : 0))));
+      setCurrentPage((prev) => Math.min(numPages, prev + 2));
       setFlipDirection(null);
     }, FLIP_DURATION);
   };
@@ -76,8 +113,18 @@ export function PDFViewer({
       return;
     }
     setFlipDirection("prev");
+    if (isMobileView) {
+      const targetPage = Math.max(1, currentPage - 1);
+      setMobileTransition({ from: currentPage, to: targetPage, direction: "prev" });
+      flipTimerRef.current = window.setTimeout(() => {
+        setCurrentPage(targetPage);
+        setMobileTransition(null);
+        setFlipDirection(null);
+      }, FLIP_DURATION);
+      return;
+    }
     flipTimerRef.current = window.setTimeout(() => {
-      setSpreadStart((prev) => Math.max(1, prev - 2));
+      setCurrentPage((prev) => Math.max(1, prev - 2));
       setFlipDirection(null);
     }, FLIP_DURATION);
   };
@@ -93,8 +140,12 @@ export function PDFViewer({
       className="space-y-4"
     >
       <div
-        className="relative mx-auto h-[760px] max-w-[1120px] overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 shadow-inner"
+        ref={viewportRef}
+        className="relative mx-auto h-auto max-w-[1120px] overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-3 shadow-inner lg:h-[760px] lg:p-4"
         onWheel={(event) => {
+          if (isMobileView) {
+            return;
+          }
           event.preventDefault();
           event.stopPropagation();
           if (Math.abs(event.deltaY) < 8 || flipDirection) {
@@ -106,16 +157,45 @@ export function PDFViewer({
             goToPrevSpread();
           }
         }}
+        onTouchStart={(event) => {
+          if (!isMobileView) {
+            return;
+          }
+          setTouchStartX(event.touches[0]?.clientX ?? null);
+        }}
+        onTouchEnd={(event) => {
+          if (!isMobileView || touchStartX === null || flipDirection) {
+            return;
+          }
+          const touchEndX = event.changedTouches[0]?.clientX;
+          if (typeof touchEndX !== "number") {
+            return;
+          }
+          const deltaX = touchStartX - touchEndX;
+          if (Math.abs(deltaX) < 44) {
+            return;
+          }
+          if (deltaX > 0) {
+            goToNextSpread();
+          } else {
+            goToPrevSpread();
+          }
+          setTouchStartX(null);
+        }}
       >
-        <div className="pointer-events-none absolute inset-y-4 left-1/2 w-px -translate-x-1/2 bg-slate-300/70" />
-        <div className="pointer-events-none absolute inset-y-4 left-1/2 w-10 -translate-x-1/2 bg-gradient-to-r from-slate-300/25 via-slate-400/30 to-slate-300/25 blur-lg" />
+        {!isMobileView && <div className="pointer-events-none absolute inset-y-4 left-1/2 w-px -translate-x-1/2 bg-slate-300/70" />}
+        {!isMobileView && (
+          <div className="pointer-events-none absolute inset-y-4 left-1/2 w-10 -translate-x-1/2 bg-gradient-to-r from-slate-300/25 via-slate-400/30 to-slate-300/25 blur-lg" />
+        )}
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <BookPage
             pageNumber={leftPage}
             isBookmarked={bookmarkedSet.has(leftPage)}
             normalizedKeyword={normalizedKeyword}
-            pageWidth={BOOK_PAGE_WIDTH}
-            pageViewportHeight={BOOK_VIEWPORT_HEIGHT}
+            pageWidth={pageWidth}
+            isMobileView={isMobileView}
+            mobileIncomingPage={isMobileView ? mobileTransition?.to ?? null : null}
+            mobileTransitionDirection={isMobileView ? mobileTransition?.direction ?? null : null}
             onNavigatePrev={goToPrevSpread}
             onNavigateNext={goToNextSpread}
           />
@@ -124,8 +204,8 @@ export function PDFViewer({
               pageNumber={rightPage}
               isBookmarked={bookmarkedSet.has(rightPage)}
               normalizedKeyword={normalizedKeyword}
-              pageWidth={BOOK_PAGE_WIDTH}
-              pageViewportHeight={BOOK_VIEWPORT_HEIGHT}
+              pageWidth={pageWidth}
+              isMobileView={isMobileView}
               onNavigatePrev={goToPrevSpread}
               onNavigateNext={goToNextSpread}
               isRightPage
@@ -150,23 +230,25 @@ export function PDFViewer({
         )}
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <button
           type="button"
           onClick={goToPrevSpread}
           disabled={!canFlipPrev || Boolean(flipDirection)}
           className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Previous spread
+          {isMobileView ? "Previous page" : "Previous spread"}
         </button>
-        <p className="text-xs text-slate-500">Scroll or click left/right page edges to flip</p>
+        <p className="text-xs text-slate-500">
+          {isMobileView ? "Swipe left/right or use buttons to navigate pages" : "Scroll or click left/right page edges to flip"}
+        </p>
         <button
           type="button"
           onClick={goToNextSpread}
           disabled={!canFlipNext || Boolean(flipDirection)}
           className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Next spread
+          {isMobileView ? "Next page" : "Next spread"}
         </button>
       </div>
 
@@ -198,6 +280,54 @@ export function PDFViewer({
             opacity: 0.72;
           }
         }
+
+        @keyframes mobilePageSlideOutNext {
+          0% {
+            transform: translateX(0) scale(1);
+            filter: brightness(1);
+            opacity: 1;
+          }
+          100% {
+            transform: translateX(-24%) scale(0.985);
+            filter: brightness(0.92);
+            opacity: 0.75;
+          }
+        }
+
+        @keyframes mobilePageSlideOutPrev {
+          0% {
+            transform: translateX(0) scale(1);
+            filter: brightness(1);
+            opacity: 1;
+          }
+          100% {
+            transform: translateX(24%) scale(0.985);
+            filter: brightness(0.92);
+            opacity: 0.75;
+          }
+        }
+
+        @keyframes mobilePageSlideInNext {
+          0% {
+            transform: translateX(100%) scale(0.985);
+            opacity: 0.96;
+          }
+          100% {
+            transform: translateX(0) scale(1);
+            opacity: 1;
+          }
+        }
+
+        @keyframes mobilePageSlideInPrev {
+          0% {
+            transform: translateX(-100%) scale(0.985);
+            opacity: 0.96;
+          }
+          100% {
+            transform: translateX(0) scale(1);
+            opacity: 1;
+          }
+        }
       `}</style>
     </Document>
   );
@@ -208,8 +338,10 @@ interface BookPageProps {
   normalizedKeyword: string;
   isBookmarked: boolean;
   pageWidth: number;
-  pageViewportHeight: number;
+  isMobileView: boolean;
   isRightPage?: boolean;
+  mobileIncomingPage?: number | null;
+  mobileTransitionDirection?: "next" | "prev" | null;
   onNavigateNext: () => void;
   onNavigatePrev: () => void;
 }
@@ -219,21 +351,57 @@ function BookPage({
   normalizedKeyword,
   isBookmarked,
   pageWidth,
-  pageViewportHeight,
+  isMobileView,
   isRightPage = false,
+  mobileIncomingPage = null,
+  mobileTransitionDirection = null,
   onNavigateNext,
   onNavigatePrev,
 }: BookPageProps) {
+  const renderPdfPage = (pageToRender: number) => (
+    <Page
+      pageNumber={pageToRender}
+      width={pageWidth}
+      renderAnnotationLayer={false}
+      renderTextLayer
+      customTextRenderer={({ str }) => {
+        if (!normalizedKeyword) {
+          return str;
+        }
+
+        const lower = str.toLowerCase();
+        if (!lower.includes(normalizedKeyword)) {
+          return str;
+        }
+
+        const regex = new RegExp(`(${escapeRegExp(normalizedKeyword)})`, "gi");
+        return str.replace(regex, '<mark style="background:#fde68a;padding:0 2px;">$1</mark>');
+      }}
+    />
+  );
+
   return (
     <div
       className={[
         "group relative overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-sm transition hover:shadow-md",
-        isRightPage ? "cursor-e-resize" : "cursor-w-resize",
+        isMobileView ? "cursor-default" : isRightPage ? "cursor-e-resize" : "cursor-w-resize",
       ].join(" ")}
-      onClick={isRightPage ? onNavigateNext : onNavigatePrev}
+      onClick={() => {
+        if (isMobileView) {
+          return;
+        }
+        if (isRightPage) {
+          onNavigateNext();
+        } else {
+          onNavigatePrev();
+        }
+      }}
       role="button"
       tabIndex={0}
       onKeyDown={(event) => {
+        if (isMobileView) {
+          return;
+        }
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           if (isRightPage) {
@@ -246,27 +414,38 @@ function BookPage({
     >
       {isBookmarked && <BookmarkRibbon />}
       <p className="mb-2 px-1 text-xs font-medium text-slate-500">Page {pageNumber}</p>
-      <div className="flex h-[700px] items-start justify-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">
-        <Page
-          pageNumber={pageNumber}
-          width={pageWidth}
-          height={pageViewportHeight}
-          renderAnnotationLayer={false}
-          renderTextLayer
-          customTextRenderer={({ str }) => {
-            if (!normalizedKeyword) {
-              return str;
-            }
-
-            const lower = str.toLowerCase();
-            if (!lower.includes(normalizedKeyword)) {
-              return str;
-            }
-
-            const regex = new RegExp(`(${escapeRegExp(normalizedKeyword)})`, "gi");
-            return str.replace(regex, '<mark style="background:#fde68a;padding:0 2px;">$1</mark>');
-          }}
-        />
+      <div
+        className={[
+          "relative flex items-start justify-center overflow-hidden rounded-md border border-slate-200 bg-slate-50",
+          isMobileView ? "min-h-[56vh] p-2" : "h-[700px]",
+        ].join(" ")}
+      >
+        {isMobileView && mobileIncomingPage && mobileTransitionDirection ? (
+          <>
+            <div
+              className={[
+                "relative z-10",
+                mobileTransitionDirection === "next"
+                  ? "animate-[mobilePageSlideOutNext_460ms_ease-in-out]"
+                  : "animate-[mobilePageSlideOutPrev_460ms_ease-in-out]",
+              ].join(" ")}
+            >
+              {renderPdfPage(pageNumber)}
+            </div>
+            <div
+              className={[
+                "absolute inset-2 z-20 flex items-start justify-center rounded-md bg-slate-50",
+                mobileTransitionDirection === "next"
+                  ? "animate-[mobilePageSlideInNext_460ms_ease-in-out]"
+                  : "animate-[mobilePageSlideInPrev_460ms_ease-in-out]",
+              ].join(" ")}
+            >
+              {renderPdfPage(mobileIncomingPage)}
+            </div>
+          </>
+        ) : (
+          renderPdfPage(pageNumber)
+        )}
       </div>
       <div
         className={[
@@ -297,4 +476,8 @@ function toSpreadStart(page: number): number {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }

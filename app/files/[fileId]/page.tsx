@@ -182,15 +182,15 @@ export default function FileViewerPage() {
         isFullscreen ? "h-screen overflow-y-auto bg-slate-950 p-4 text-white" : "",
       ].join(" ")}
     >
-      <div className={["rounded-xl border p-4 shadow-sm", isFullscreen ? "relative border-slate-700 bg-slate-900" : "border-slate-200 bg-white"].join(" ")}>
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div className="space-y-1">
+      <div className={["rounded-xl border p-3 shadow-sm sm:p-4", isFullscreen ? "relative border-slate-700 bg-slate-900" : "border-slate-200 bg-white"].join(" ")}>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 space-y-1">
             <Link href="/" className={["inline-flex text-xs font-medium hover:underline", isFullscreen ? "text-blue-300" : "text-blue-700"].join(" ")}>
               ← Back to library
             </Link>
-            <h1 className={["text-lg font-semibold", isFullscreen ? "text-white" : "text-slate-900"].join(" ")}>{displayFilename}</h1>
+            <h1 className={["truncate text-base font-semibold sm:text-lg", isFullscreen ? "text-white" : "text-slate-900"].join(" ")}>{displayFilename}</h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => void toggleFullscreen()}
@@ -208,11 +208,11 @@ export default function FileViewerPage() {
         </div>
         <div
           className={[
-            "mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3",
+            "mb-4 flex flex-col gap-3 rounded-xl border px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4",
             isFullscreen ? "border-slate-700 bg-slate-800/90" : "border-slate-200 bg-gradient-to-r from-white to-slate-50",
           ].join(" ")}
         >
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-sm">
             <p className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
               Page {currentPage} / {totalPages || "—"}
             </p>
@@ -261,16 +261,16 @@ export default function FileViewerPage() {
           </div>
         )}
 
-        <div className="min-h-[70vh] rounded-xl border border-slate-200 bg-slate-100 p-4">
+        <div className="min-h-[58vh] rounded-xl border border-slate-200 bg-slate-100 p-2 sm:min-h-[70vh] sm:p-4">
           {blobUrl && (
-          <PDFViewer
-            fileUrl={blobUrl}
-            activePage={currentPage}
-            keyword={keyword}
-            onCurrentPageChange={setCurrentPage}
-            onNumPagesChange={setTotalPages}
-            bookmarkedPages={bookmarkedPages}
-          />
+            <PDFViewer
+              fileUrl={blobUrl}
+              activePage={currentPage}
+              keyword={keyword}
+              onCurrentPageChange={setCurrentPage}
+              onNumPagesChange={setTotalPages}
+              bookmarkedPages={bookmarkedPages}
+            />
           )}
         </div>
       </div>
