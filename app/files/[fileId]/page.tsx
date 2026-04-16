@@ -216,67 +216,102 @@ export default function FileViewerPage() {
       ref={viewerSectionRef}
       className={[
         "space-y-4",
-        isPseudoFullscreen ? "fixed inset-0 z-50 h-[100dvh] overflow-y-auto bg-slate-950 p-3 text-white sm:p-4" : "",
-        isNativeFullscreen && !isPseudoFullscreen ? "h-screen overflow-y-auto bg-slate-950 p-4 text-white" : "",
+        isPseudoFullscreen ? "fixed inset-0 z-50 flex h-[100dvh] overflow-hidden bg-slate-950 text-white" : "",
+        isNativeFullscreen && !isPseudoFullscreen ? "flex h-screen overflow-hidden bg-slate-950 text-white" : "",
       ].join(" ")}
     >
-      <div className={["rounded-xl border p-3 shadow-sm sm:p-4", isFullscreen ? "relative border-slate-700 bg-slate-900" : "border-slate-200 bg-white"].join(" ")}>
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0 space-y-1">
+      <div
+        className={[
+          "rounded-xl border p-3 shadow-sm sm:p-4",
+          isFullscreen
+            ? "relative flex h-full w-full flex-col border-0 bg-slate-950 p-0 shadow-none"
+            : "border-slate-200 bg-white",
+        ].join(" ")}
+      >
+        <div
+          className={[
+            isFullscreen
+              ? "absolute left-2 right-2 top-2 z-20 flex items-center justify-end gap-2 rounded-xl border border-slate-700/80 bg-slate-900/70 p-1.5 backdrop-blur sm:left-4 sm:right-4 sm:justify-between"
+              : "mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between",
+          ].join(" ")}
+        >
+          <div className={["min-w-0 space-y-1", isFullscreen ? "hidden" : ""].join(" ")}>
             <Link href="/" className={["inline-flex text-xs font-medium hover:underline", isFullscreen ? "text-blue-300" : "text-blue-700"].join(" ")}>
               ← Back to library
             </Link>
-            <h1 className={["truncate text-base font-semibold sm:text-lg", isFullscreen ? "text-white" : "text-slate-900"].join(" ")}>{displayFilename}</h1>
+            <h1 className={["truncate text-base font-semibold sm:text-lg", isFullscreen ? "text-white max-w-[78vw] text-sm sm:max-w-[60vw] sm:text-base" : "text-slate-900"].join(" ")}>{displayFilename}</h1>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2">
+            {isFullscreen && (
+              <button
+                type="button"
+                onClick={() => toggleBookmark(currentPage)}
+                className={[
+                  "rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition",
+                  isCurrentPageBookmarked
+                    ? "bg-fuchsia-600 text-white hover:bg-fuchsia-500"
+                    : "border border-slate-500 bg-slate-800 text-white hover:bg-slate-700",
+                ].join(" ")}
+              >
+                {isCurrentPageBookmarked ? "Bookmarked" : "Bookmark"}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => void toggleFullscreen()}
-              className={["rounded-md px-3 py-2 text-xs font-medium", isFullscreen ? "border border-slate-500 bg-slate-800 text-white hover:bg-slate-700" : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"].join(" ")}
+              className={[
+                "rounded-md px-3 py-2 text-xs font-medium",
+                isFullscreen ? "border border-slate-500 bg-slate-800 text-white hover:bg-slate-700 sm:px-2.5 sm:py-1.5 sm:text-[11px]" : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+              ].join(" ")}
             >
               {isFullscreen ? "Exit full screen" : "Full screen"}
             </button>
             <button
               onClick={onDownload}
-              className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700"
+              className={[
+                "rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700",
+                isFullscreen ? "hidden" : "",
+              ].join(" ")}
             >
               Download PDF
             </button>
           </div>
         </div>
-        <div
-          className={[
-            "mb-4 flex flex-col gap-3 rounded-xl border px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4",
-            isFullscreen ? "border-slate-700 bg-slate-800/90" : "border-slate-200 bg-gradient-to-r from-white to-slate-50",
-          ].join(" ")}
-        >
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-sm">
-            <p className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
-              Page {currentPage} / {totalPages || "—"}
-            </p>
-            {keyword && (
-              <p className="rounded-full border border-yellow-200 bg-yellow-50 px-3 py-1 text-xs text-slate-700">
-                Keyword highlight: <span className="font-semibold">{keyword}</span>
+        {!isFullscreen && (
+          <div
+            className={[
+              "mb-4 flex flex-col gap-3 rounded-xl border px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4",
+              "border-slate-200 bg-gradient-to-r from-white to-slate-50",
+            ].join(" ")}
+          >
+            <div className="flex flex-wrap items-center gap-2 text-sm sm:gap-3">
+              <p className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
+                Page {currentPage} / {totalPages || "—"}
               </p>
-            )}
+              {keyword && (
+                <p className="rounded-full border border-yellow-200 bg-yellow-50 px-3 py-1 text-xs text-slate-700">
+                  Keyword highlight: <span className="font-semibold">{keyword}</span>
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => toggleBookmark(currentPage)}
+                className={[
+                  "rounded-lg px-3 py-2 text-xs font-semibold transition",
+                  isCurrentPageBookmarked
+                    ? "bg-fuchsia-600 text-white hover:bg-fuchsia-500"
+                    : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+                ].join(" ")}
+              >
+                {isCurrentPageBookmarked ? "Remove bookmark" : "Bookmark this page"}
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => toggleBookmark(currentPage)}
-              className={[
-                "rounded-lg px-3 py-2 text-xs font-semibold transition",
-                isCurrentPageBookmarked
-                  ? "bg-fuchsia-600 text-white hover:bg-fuchsia-500"
-                  : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
-              ].join(" ")}
-            >
-              {isCurrentPageBookmarked ? "Remove bookmark" : "Bookmark this page"}
-            </button>
-          </div>
-        </div>
+        )}
 
-        {bookmarkedPages.length > 0 && (
+        {!isFullscreen && bookmarkedPages.length > 0 && (
           <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Bookmarks</p>
             <div className="flex flex-wrap gap-2">
@@ -299,7 +334,12 @@ export default function FileViewerPage() {
           </div>
         )}
 
-        <div className="min-h-[58vh] rounded-xl border border-slate-200 bg-slate-100 p-2 sm:min-h-[70vh] sm:p-4">
+        <div
+          className={[
+            "rounded-xl border border-slate-200 bg-slate-100 p-2 sm:p-4",
+            isFullscreen ? "flex min-h-0 flex-1 rounded-none border-0 bg-slate-950 p-0 pt-[52px]" : "min-h-[58vh] sm:min-h-[70vh]",
+          ].join(" ")}
+        >
           {blobUrl && (
             <PDFViewer
               fileUrl={blobUrl}

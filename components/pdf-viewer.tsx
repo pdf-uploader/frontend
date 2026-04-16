@@ -36,6 +36,7 @@ export function PDFViewer({
     direction: "next" | "prev";
   } | null>(null);
   const [viewportWidth, setViewportWidth] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const flipTimerRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -46,9 +47,17 @@ export function PDFViewer({
   const effectiveDesktopLeftPage = toSpreadStart(currentPage);
   const leftPage = isMobileView ? currentPage : effectiveDesktopLeftPage;
   const rightPage = !isMobileView && effectiveDesktopLeftPage + 1 <= numPages ? effectiveDesktopLeftPage + 1 : null;
+  const isMobileFullscreen = isFullscreen && isMobileView;
   const pageWidth = isMobileView
-    ? clampNumber(Math.floor(viewportWidth - 56), 240, MOBILE_PAGE_MAX_WIDTH)
-    : BOOK_PAGE_WIDTH;
+    ? clampNumber(
+        Math.floor(viewportWidth - (isFullscreen ? 8 : 56)),
+        240,
+        isFullscreen ? 1200 : MOBILE_PAGE_MAX_WIDTH
+      )
+    : isFullscreen
+      ? clampNumber(Math.floor((viewportWidth - 8) / 2), 320, 1800)
+      : BOOK_PAGE_WIDTH;
+  const pageHeight = isMobileFullscreen ? clampNumber(Math.floor(viewportHeight - 6), 240, 2600) : undefined;
 
   useEffect(() => {
     if (!numPages) {
@@ -71,6 +80,7 @@ export function PDFViewer({
         return;
       }
       setViewportWidth(viewportRef.current.clientWidth);
+      setViewportHeight(viewportRef.current.clientHeight);
     };
 
     updateViewportWidth();
@@ -202,11 +212,16 @@ export function PDFViewer({
         onNumPagesChange?.(pages);
       }}
       loading={<p className="text-sm text-slate-600">Loading PDF...</p>}
-      className="space-y-4"
+      className={isFullscreen ? "flex h-full w-full flex-col" : "space-y-4"}
     >
       <div
         ref={viewportRef}
-        className="relative mx-auto h-auto max-w-[1120px] overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-3 shadow-inner touch-pan-y lg:h-[760px] lg:p-4"
+        className={[
+          "relative overflow-hidden border touch-pan-y",
+          isFullscreen
+            ? "h-full w-full rounded-none border-0 bg-slate-950 p-0"
+            : "mx-auto h-auto max-w-[1120px] rounded-2xl border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-3 shadow-inner lg:h-[760px] lg:p-4",
+        ].join(" ")}
         style={{ WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
         onWheel={(event) => {
           if (isMobileView) {
@@ -249,17 +264,19 @@ export function PDFViewer({
           setTouchStartX(null);
         }}
       >
-        {!isMobileView && <div className="pointer-events-none absolute inset-y-4 left-1/2 w-px -translate-x-1/2 bg-slate-300/70" />}
+        {!isMobileView && <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/70" />}
         {!isMobileView && (
-          <div className="pointer-events-none absolute inset-y-4 left-1/2 w-10 -translate-x-1/2 bg-gradient-to-r from-slate-300/25 via-slate-400/30 to-slate-300/25 blur-lg" />
+          <div className="pointer-events-none absolute inset-y-0 left-1/2 w-10 -translate-x-1/2 bg-gradient-to-r from-slate-300/25 via-slate-400/30 to-slate-300/25 blur-lg" />
         )}
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className={["grid grid-cols-1 gap-3 lg:grid-cols-2", isFullscreen ? "h-full w-full gap-0" : ""].join(" ")}>
           <BookPage
             pageNumber={leftPage}
             isBookmarked={bookmarkedSet.has(leftPage)}
             normalizedKeyword={normalizedKeyword}
             pageWidth={pageWidth}
+            pageHeight={pageHeight}
             isMobileView={isMobileView}
+            isFullscreen={isFullscreen}
             mobileIncomingPage={isMobileView ? mobileTransition?.to ?? null : null}
             mobileTransitionDirection={isMobileView ? mobileTransition?.direction ?? null : null}
             onNavigatePrev={goToPrevSpread}
@@ -271,13 +288,15 @@ export function PDFViewer({
               isBookmarked={bookmarkedSet.has(rightPage)}
               normalizedKeyword={normalizedKeyword}
               pageWidth={pageWidth}
+              pageHeight={pageHeight}
               isMobileView={isMobileView}
+              isFullscreen={isFullscreen}
               onNavigatePrev={goToPrevSpread}
               onNavigateNext={goToNextSpread}
               isRightPage
             />
           ) : (
-            <div className="hidden rounded-xl border border-dashed border-slate-300 bg-white/70 lg:block" />
+            <div className={["hidden lg:block", isFullscreen ? "bg-white" : "rounded-xl border border-dashed border-slate-300 bg-white/70"].join(" ")} />
           )}
         </div>
 
@@ -296,29 +315,31 @@ export function PDFViewer({
         )}
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <button
-          type="button"
-          onClick={goToPrevSpread}
-          disabled={!canFlipPrev || Boolean(flipDirection)}
-          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {isMobileView ? "Previous page" : "Previous spread"}
-        </button>
-        <p className="text-xs text-slate-500">
-          {isMobileView
-            ? "Tap left/right side, swipe, or use buttons to navigate pages"
-            : "Scroll or click left/right page edges to flip"}
-        </p>
-        <button
-          type="button"
-          onClick={goToNextSpread}
-          disabled={!canFlipNext || Boolean(flipDirection)}
-          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {isMobileView ? "Next page" : "Next spread"}
-        </button>
-      </div>
+      {!isFullscreen && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <button
+            type="button"
+            onClick={goToPrevSpread}
+            disabled={!canFlipPrev || Boolean(flipDirection)}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isMobileView ? "Previous page" : "Previous spread"}
+          </button>
+          <p className="text-xs text-slate-500">
+            {isMobileView
+              ? "Tap left/right side, swipe, or use buttons to navigate pages"
+              : "Scroll or click left/right page edges to flip"}
+          </p>
+          <button
+            type="button"
+            onClick={goToNextSpread}
+            disabled={!canFlipNext || Boolean(flipDirection)}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isMobileView ? "Next page" : "Next spread"}
+          </button>
+        </div>
+      )}
 
       <style jsx global>{`
         @keyframes bookFlipNext {
@@ -406,7 +427,9 @@ interface BookPageProps {
   normalizedKeyword: string;
   isBookmarked: boolean;
   pageWidth: number;
+  pageHeight?: number;
   isMobileView: boolean;
+  isFullscreen: boolean;
   isRightPage?: boolean;
   mobileIncomingPage?: number | null;
   mobileTransitionDirection?: "next" | "prev" | null;
@@ -419,7 +442,9 @@ function BookPage({
   normalizedKeyword,
   isBookmarked,
   pageWidth,
+  pageHeight,
   isMobileView,
+  isFullscreen,
   isRightPage = false,
   mobileIncomingPage = null,
   mobileTransitionDirection = null,
@@ -429,7 +454,8 @@ function BookPage({
   const renderPdfPage = (pageToRender: number) => (
     <Page
       pageNumber={pageToRender}
-      width={pageWidth}
+      width={pageHeight ? undefined : pageWidth}
+      height={pageHeight}
       renderAnnotationLayer={false}
       renderTextLayer
       customTextRenderer={({ str }) => {
@@ -451,7 +477,8 @@ function BookPage({
   return (
     <div
       className={[
-        "group relative overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-sm transition hover:shadow-md",
+        "group relative flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-sm transition hover:shadow-md",
+        isFullscreen ? "h-full rounded-none border-0 p-0 shadow-none" : "",
         isMobileView ? "cursor-default" : isRightPage ? "cursor-e-resize" : "cursor-w-resize",
       ].join(" ")}
       onClick={(event) => {
@@ -487,12 +514,18 @@ function BookPage({
         }
       }}
     >
-      {isBookmarked && <BookmarkRibbon />}
-      <p className="mb-2 px-1 text-xs font-medium text-slate-500">Page {pageNumber}</p>
+      {!isFullscreen && isBookmarked && <BookmarkRibbon />}
+      {!isFullscreen && <p className="mb-2 px-1 text-xs font-medium text-slate-500">Page {pageNumber}</p>}
       <div
         className={[
           "relative flex items-start justify-center overflow-hidden rounded-md border border-slate-200 bg-slate-50",
-          isMobileView ? "min-h-[56vh] p-2" : "h-[700px]",
+          isMobileView
+            ? isFullscreen
+              ? "h-full min-h-0 p-0"
+              : "min-h-[56vh] p-2"
+            : isFullscreen
+              ? "min-h-0 flex-1 items-center rounded-none border-0 p-0"
+              : "h-[700px]",
         ].join(" ")}
       >
         {isMobileView && mobileIncomingPage && mobileTransitionDirection ? (
@@ -509,7 +542,8 @@ function BookPage({
             </div>
             <div
               className={[
-                "absolute inset-2 z-20 flex items-start justify-center rounded-md bg-slate-50",
+                "absolute z-20 flex items-start justify-center bg-slate-50",
+                isFullscreen ? "inset-0 rounded-none" : "inset-2 rounded-md",
                 mobileTransitionDirection === "next"
                   ? "animate-[mobilePageSlideInNext_460ms_ease-in-out]"
                   : "animate-[mobilePageSlideInPrev_460ms_ease-in-out]",
@@ -522,12 +556,14 @@ function BookPage({
           renderPdfPage(pageNumber)
         )}
       </div>
-      <div
-        className={[
-          "pointer-events-none absolute inset-y-0 w-14 bg-gradient-to-r opacity-0 transition group-hover:opacity-100",
-          isRightPage ? "right-0 from-transparent to-slate-300/30" : "left-0 from-slate-300/30 to-transparent",
-        ].join(" ")}
-      />
+      {!isFullscreen && (
+        <div
+          className={[
+            "pointer-events-none absolute inset-y-0 w-14 bg-gradient-to-r opacity-0 transition group-hover:opacity-100",
+            isRightPage ? "right-0 from-transparent to-slate-300/30" : "left-0 from-slate-300/30 to-transparent",
+          ].join(" ")}
+        />
+      )}
     </div>
   );
 }
