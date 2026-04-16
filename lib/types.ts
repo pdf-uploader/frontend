@@ -12,6 +12,7 @@ export interface AuthTokens {
 }
 
 export interface SignInResponse {
+  message: string | undefined;
   accessToken: string;
   user?: AuthUser;
 }

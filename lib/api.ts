@@ -68,35 +68,43 @@ api.interceptors.response.use(
 );
 
 export async function signIn(email: string, password: string): Promise<SignInResponse> {
-  const response = await api.post<SignInResponse>("/auth/signIn", { email, password });
-  const payload = response.data as SignInResponse & {
-    data?: { accessToken?: string };
-    token?: string;
-  };
-  const accessToken = payload.accessToken ?? payload.data?.accessToken ?? payload.token;
+  try {
+    const response = await api.post<SignInResponse>("/auth/signIn", { email, password });
+    const payload = response.data as SignInResponse & {
+      data?: { accessToken?: string };
+      token?: string;
+    };
+    const accessToken = payload.accessToken ?? payload.data?.accessToken ?? payload.token;
 
-  if (!accessToken) {
-    throw new Error("Login response did not include an access token.");
+
+    authStore.setAccessToken(accessToken);
+
+    const userFromPayload = normalizeAuthUser(payload.user ?? null);
+    const userFromToken = authUserFromAccessToken(accessToken, email);
+    const resolvedUser = userFromPayload ?? userFromToken;
+
+    if (!resolvedUser) {
+      authStore.clear();
+      throw new Error("Access token was received but user claims could not be parsed.");
+    }
+
+    authStore.setUser(resolvedUser);
+
+    return {
+      ...payload,
+      accessToken,
+      user: resolvedUser,
+    };
+  } catch (error) {
+    if (axios.isAxiosError<{ message?: string }>(error)) {
+      const apiMessage = error.response?.data?.message ?? error.message;
+      throw new Error(apiMessage || "Login failed. Check credentials and try again.");
+    }
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error("Login failed. Check credentials and try again.");
   }
-
-  authStore.setAccessToken(accessToken);
-
-  const userFromPayload = normalizeAuthUser(payload.user ?? null);
-  const userFromToken = authUserFromAccessToken(accessToken, email);
-  const resolvedUser = userFromPayload ?? userFromToken;
-
-  if (!resolvedUser) {
-    authStore.clear();
-    throw new Error("Access token was received but user claims could not be parsed.");
-  }
-
-  authStore.setUser(resolvedUser);
-
-  return {
-    ...payload,
-    accessToken,
-    user: resolvedUser,
-  };
 }
 
 export async function signOut(): Promise<void> {

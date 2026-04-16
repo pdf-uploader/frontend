@@ -31,6 +31,9 @@ export default function LoginPage() {
         loginMutation.error.message;
       return apiMessage || "Login failed. Check credentials and try again.";
     }
+    if (loginMutation.error instanceof Error) {
+      return loginMutation.error.message || "Login failed. Check credentials and try again.";
+    }
     return "Login failed. Check credentials and try again.";
   })();
 
