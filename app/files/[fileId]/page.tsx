@@ -27,8 +27,10 @@ export default function FileViewerPage() {
   const [totalPages, setTotalPages] = useState(0);
   const [bookmarkedPages, setBookmarkedPages] = useState<number[]>([]);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
+  const [isPseudoFullscreen, setIsPseudoFullscreen] = useState(false);
   const viewerSectionRef = useRef<HTMLElement | null>(null);
+  const isFullscreen = isNativeFullscreen || isPseudoFullscreen;
 
   const fileQuery = useQuery({
     queryKey: ["file", fileId],
@@ -89,7 +91,7 @@ export default function FileViewerPage() {
   useEffect(() => {
     const onFullscreenChange = () => {
       const inFullscreen = document.fullscreenElement === viewerSectionRef.current;
-      setIsFullscreen(inFullscreen);
+      setIsNativeFullscreen(inFullscreen);
     };
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
@@ -97,13 +99,34 @@ export default function FileViewerPage() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && document.fullscreenElement) {
+      if (event.key !== "Escape") {
+        return;
+      }
+      if (isPseudoFullscreen) {
+        setIsPseudoFullscreen(false);
+        return;
+      }
+      if (document.fullscreenElement) {
         void document.exitFullscreen();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [isPseudoFullscreen]);
+
+  useEffect(() => {
+    if (!isPseudoFullscreen) {
+      return;
+    }
+    const originalBodyOverflow = document.body.style.overflow;
+    const originalHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = originalBodyOverflow;
+      document.documentElement.style.overflow = originalHtmlOverflow;
+    };
+  }, [isPseudoFullscreen]);
 
   const displayFilename = useMemo(
     () => fileQuery.data?.filename || `file-${fileId}.pdf`,
@@ -167,11 +190,25 @@ export default function FileViewerPage() {
     if (!viewerSectionRef.current) {
       return;
     }
+    if (isPseudoFullscreen) {
+      setIsPseudoFullscreen(false);
+      return;
+    }
     if (document.fullscreenElement === viewerSectionRef.current) {
       await document.exitFullscreen();
       return;
     }
-    await viewerSectionRef.current.requestFullscreen();
+    const canUseNativeFullscreen =
+      typeof viewerSectionRef.current.requestFullscreen === "function" && typeof document.exitFullscreen === "function";
+    if (canUseNativeFullscreen) {
+      try {
+        await viewerSectionRef.current.requestFullscreen();
+        return;
+      } catch {
+        // Fall back to pseudo fullscreen for browsers like iPhone Safari.
+      }
+    }
+    setIsPseudoFullscreen(true);
   };
 
   return (
@@ -179,7 +216,8 @@ export default function FileViewerPage() {
       ref={viewerSectionRef}
       className={[
         "space-y-4",
-        isFullscreen ? "h-screen overflow-y-auto bg-slate-950 p-4 text-white" : "",
+        isPseudoFullscreen ? "fixed inset-0 z-50 h-[100dvh] overflow-y-auto bg-slate-950 p-3 text-white sm:p-4" : "",
+        isNativeFullscreen && !isPseudoFullscreen ? "h-screen overflow-y-auto bg-slate-950 p-4 text-white" : "",
       ].join(" ")}
     >
       <div className={["rounded-xl border p-3 shadow-sm sm:p-4", isFullscreen ? "relative border-slate-700 bg-slate-900" : "border-slate-200 bg-white"].join(" ")}>

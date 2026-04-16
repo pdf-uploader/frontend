@@ -75,8 +75,45 @@ export function PDFViewer({
 
     updateViewportWidth();
     window.addEventListener("resize", updateViewportWidth);
-    return () => window.removeEventListener("resize", updateViewportWidth);
+    window.addEventListener("orientationchange", updateViewportWidth);
+    return () => {
+      window.removeEventListener("resize", updateViewportWidth);
+      window.removeEventListener("orientationchange", updateViewportWidth);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!isMobileView) {
+      return;
+    }
+
+    const preventPinchZoom = (event: TouchEvent) => {
+      if (event.touches.length > 1) {
+        event.preventDefault();
+      }
+    };
+
+    const preventDoubleTapZoom = (event: TouchEvent) => {
+      const now = Date.now();
+      const target = event.currentTarget as HTMLDivElement & { __lastTapTime?: number };
+      if (target.__lastTapTime && now - target.__lastTapTime < 280) {
+        event.preventDefault();
+      }
+      target.__lastTapTime = now;
+    };
+
+    const currentViewport = viewportRef.current;
+    if (!currentViewport) {
+      return;
+    }
+
+    currentViewport.addEventListener("touchstart", preventPinchZoom, { passive: false });
+    currentViewport.addEventListener("touchend", preventDoubleTapZoom, { passive: false });
+    return () => {
+      currentViewport.removeEventListener("touchstart", preventPinchZoom);
+      currentViewport.removeEventListener("touchend", preventDoubleTapZoom);
+    };
+  }, [isMobileView]);
 
   useEffect(() => {
     return () => {
@@ -169,7 +206,8 @@ export function PDFViewer({
     >
       <div
         ref={viewportRef}
-        className="relative mx-auto h-auto max-w-[1120px] overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-3 shadow-inner lg:h-[760px] lg:p-4"
+        className="relative mx-auto h-auto max-w-[1120px] overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-3 shadow-inner touch-pan-y lg:h-[760px] lg:p-4"
+        style={{ WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
         onWheel={(event) => {
           if (isMobileView) {
             return;
