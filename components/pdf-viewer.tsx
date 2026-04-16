@@ -451,11 +451,14 @@ function BookPage({
   onNavigateNext,
   onNavigatePrev,
 }: BookPageProps) {
+  const desktopFullscreenScale = isFullscreen && !isMobileView ? 1.4 : 1;
+
   const renderPdfPage = (pageToRender: number) => (
     <Page
       pageNumber={pageToRender}
       width={pageHeight ? undefined : pageWidth}
       height={pageHeight}
+      scale={desktopFullscreenScale}
       renderAnnotationLayer={false}
       renderTextLayer
       customTextRenderer={({ str }) => {
