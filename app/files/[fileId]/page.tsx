@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
@@ -27,6 +27,8 @@ export default function FileViewerPage() {
   const [totalPages, setTotalPages] = useState(0);
   const [bookmarkedPages, setBookmarkedPages] = useState<number[]>([]);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const viewerSectionRef = useRef<HTMLElement | null>(null);
 
   const fileQuery = useQuery({
     queryKey: ["file", fileId],
@@ -83,6 +85,25 @@ export default function FileViewerPage() {
   useEffect(() => {
     window.localStorage.setItem(getBookmarkStorageKey(fileId), JSON.stringify(bookmarkedPages));
   }, [bookmarkedPages, fileId]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      const inFullscreen = document.fullscreenElement === viewerSectionRef.current;
+      setIsFullscreen(inFullscreen);
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && document.fullscreenElement) {
+        void document.exitFullscreen();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const displayFilename = useMemo(
     () => fileQuery.data?.filename || `file-${fileId}.pdf`,
@@ -142,17 +163,41 @@ export default function FileViewerPage() {
 
   const isCurrentPageBookmarked = bookmarkedPages.includes(currentPage);
 
+  const toggleFullscreen = async () => {
+    if (!viewerSectionRef.current) {
+      return;
+    }
+    if (document.fullscreenElement === viewerSectionRef.current) {
+      await document.exitFullscreen();
+      return;
+    }
+    await viewerSectionRef.current.requestFullscreen();
+  };
+
   return (
-    <section className="space-y-4">
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <section
+      ref={viewerSectionRef}
+      className={[
+        "space-y-4",
+        isFullscreen ? "h-screen overflow-y-auto bg-slate-950 p-4 text-white" : "",
+      ].join(" ")}
+    >
+      <div className={["rounded-xl border p-4 shadow-sm", isFullscreen ? "relative border-slate-700 bg-slate-900" : "border-slate-200 bg-white"].join(" ")}>
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="space-y-1">
-            <Link href="/" className="inline-flex text-xs font-medium text-blue-700 hover:underline">
+            <Link href="/" className={["inline-flex text-xs font-medium hover:underline", isFullscreen ? "text-blue-300" : "text-blue-700"].join(" ")}>
               ← Back to library
             </Link>
-            <h1 className="text-lg font-semibold">{displayFilename}</h1>
+            <h1 className={["text-lg font-semibold", isFullscreen ? "text-white" : "text-slate-900"].join(" ")}>{displayFilename}</h1>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void toggleFullscreen()}
+              className={["rounded-md px-3 py-2 text-xs font-medium", isFullscreen ? "border border-slate-500 bg-slate-800 text-white hover:bg-slate-700" : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"].join(" ")}
+            >
+              {isFullscreen ? "Exit full screen" : "Full screen"}
+            </button>
             <button
               onClick={onDownload}
               className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700"
@@ -161,7 +206,12 @@ export default function FileViewerPage() {
             </button>
           </div>
         </div>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-gradient-to-r from-white to-slate-50 px-4 py-3">
+        <div
+          className={[
+            "mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3",
+            isFullscreen ? "border-slate-700 bg-slate-800/90" : "border-slate-200 bg-gradient-to-r from-white to-slate-50",
+          ].join(" ")}
+        >
           <div className="flex items-center gap-3 text-sm">
             <p className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
               Page {currentPage} / {totalPages || "—"}
