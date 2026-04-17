@@ -1,14 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, DragEvent, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useDebounce } from "use-debounce";
+import axios from "axios";
 import { isAdminUser } from "@/lib/auth-user";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/use-auth";
-import { Folder } from "@/lib/types";
+import { Folder, FolderFile } from "@/lib/types";
 
 interface FileVersionItem {
   id: string;
@@ -24,6 +25,9 @@ export default function FolderPage() {
   const [folderSearch, setFolderSearch] = useState("");
   const [dragging, setDragging] = useState(false);
   const [dragCounter, setDragCounter] = useState(0);
+  const [orderedFiles, setOrderedFiles] = useState<FolderFile[]>([]);
+  const [draggedFileId, setDraggedFileId] = useState<string | null>(null);
+  const [dragOverFileId, setDragOverFileId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [debouncedFolderSearch] = useDebounce(folderSearch, 300);
 
@@ -59,6 +63,14 @@ export default function FolderPage() {
 
   const deleteFileMutation = useMutation({
     mutationFn: async (fileId: string) => api.delete(`/files/${fileId}`),
+    onSuccess: (_, deletedFileId) => {
+      setOrderedFiles((prev) => prev.filter((file) => file.id !== deletedFileId));
+      folderQuery.refetch();
+    },
+  });
+
+  const saveOrderMutation = useMutation({
+    mutationFn: async (fileIds: string[]) => api.patch(`/folders/${folderId}/files/order`, { fileIds }),
     onSuccess: () => {
       folderQuery.refetch();
     },
@@ -72,15 +84,25 @@ export default function FolderPage() {
     enabled: debouncedFolderSearch.trim().length > 0,
   });
 
+  const folder = folderQuery.data;
+  const fileOrderSignature = folder?.files.map((file) => file.id).join("|") ?? "";
+
+  useEffect(() => {
+    if (folder) {
+      setOrderedFiles(folder.files);
+    }
+  }, [fileOrderSignature, folder]);
+
   if (folderQuery.isLoading) {
     return <p className="text-sm text-slate-600">Loading folder...</p>;
   }
 
-  if (folderQuery.error || !folderQuery.data) {
+  if (folderQuery.error || !folder) {
     return <p className="text-sm text-red-600">Folder not found or unavailable.</p>;
   }
 
-  const folder = folderQuery.data;
+  const localOrderSignature = orderedFiles.map((file) => file.id).join("|");
+  const hasOrderChanges = Boolean(localOrderSignature) && localOrderSignature !== fileOrderSignature;
 
   const onDropped = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
@@ -100,6 +122,16 @@ export default function FolderPage() {
       uploadMutation.mutate(files);
     }
     event.target.value = "";
+  };
+
+  const moveFileByStep = (index: number, direction: -1 | 1) => {
+    setOrderedFiles((prev) => {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= prev.length) {
+        return prev;
+      }
+      return moveFile(prev, index, targetIndex);
+    });
   };
 
   return (
@@ -170,23 +202,45 @@ export default function FolderPage() {
 
       <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 text-sm">
         {admin ? (
-          <div className="flex items-center justify-between gap-2">
-            <p>Drop PDF files anywhere on this page or use + to upload multiple files</p>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="rounded bg-slate-900 px-2 py-1 text-white"
-              title="Upload files"
-            >
-              +
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/pdf"
-              multiple
-              className="hidden"
-              onChange={onFilePick}
-            />
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <p>Drop PDF files anywhere on this page or use + to upload multiple files</p>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded bg-slate-900 px-2 py-1 text-white"
+                title="Upload files"
+              >
+                +
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf"
+                multiple
+                className="hidden"
+                onChange={onFilePick}
+              />
+            </div>
+            {orderedFiles.length > 1 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                <p>Drag and drop files in the list to reorder them, then save.</p>
+                <button
+                  onClick={() => saveOrderMutation.mutate(orderedFiles.map((file) => file.id))}
+                  disabled={!hasOrderChanges || saveOrderMutation.isPending}
+                  className="rounded bg-blue-700 px-3 py-1.5 font-medium text-white disabled:cursor-not-allowed disabled:bg-blue-300"
+                >
+                  {saveOrderMutation.isPending ? "Saving order..." : "Save order"}
+                </button>
+              </div>
+            )}
+            {saveOrderMutation.error && (
+              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {axios.isAxiosError(saveOrderMutation.error)
+                  ? ((saveOrderMutation.error.response?.data as { message?: string } | undefined)?.message ??
+                    saveOrderMutation.error.message)
+                  : "Could not save order right now."}
+              </p>
+            )}
           </div>
         ) : (
           <p>Files in this folder</p>
@@ -194,24 +248,94 @@ export default function FolderPage() {
       </div>
 
       <ul className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-        {folder.files.map((file) => (
-          <li key={file.id} className="flex items-center justify-between rounded border border-slate-200 px-3 py-2 text-sm">
-            <Link href={`/files/${file.id}`} className="truncate text-blue-700 hover:underline">
-              📄 {file.filename}
-            </Link>
+        {orderedFiles.map((file, index) => (
+          <li
+            key={file.id}
+            className={`flex items-center justify-between rounded border px-3 py-2 text-sm transition ${
+              dragOverFileId === file.id ? "border-blue-400 bg-blue-50" : "border-slate-200"
+            }`}
+            draggable={admin}
+            onDragStart={() => {
+              if (!admin) return;
+              setDraggedFileId(file.id);
+            }}
+            onDragOver={(event) => {
+              if (!admin) return;
+              event.preventDefault();
+              if (draggedFileId !== file.id) {
+                setDragOverFileId(file.id);
+              }
+            }}
+            onDrop={(event) => {
+              if (!admin) return;
+              event.preventDefault();
+              if (!draggedFileId || draggedFileId === file.id) {
+                setDragOverFileId(null);
+                return;
+              }
+              setOrderedFiles((prev) => {
+                const fromIndex = prev.findIndex((item) => item.id === draggedFileId);
+                const toIndex = prev.findIndex((item) => item.id === file.id);
+                if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+                  return prev;
+                }
+                return moveFile(prev, fromIndex, toIndex);
+              });
+              setDragOverFileId(null);
+              setDraggedFileId(null);
+            }}
+            onDragEnd={() => {
+              setDragOverFileId(null);
+              setDraggedFileId(null);
+            }}
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              {admin && <span className="text-slate-400">⋮⋮</span>}
+              <Link href={`/files/${file.id}`} className="truncate text-blue-700 hover:underline">
+                📄 {file.filename}
+              </Link>
+            </div>
             {admin && (
-              <button
-                onClick={() => deleteFileMutation.mutate(file.id)}
-                className="rounded px-1 text-red-600 hover:bg-red-50"
-                title="Delete file"
-              >
-                🗑
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => moveFileByStep(index, -1)}
+                  disabled={index === 0}
+                  className="rounded px-1 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                  title="Move up"
+                >
+                  ↑
+                </button>
+                <button
+                  onClick={() => moveFileByStep(index, 1)}
+                  disabled={index === orderedFiles.length - 1}
+                  className="rounded px-1 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                  title="Move down"
+                >
+                  ↓
+                </button>
+                <button
+                  onClick={() => deleteFileMutation.mutate(file.id)}
+                  className="rounded px-1 text-red-600 hover:bg-red-50"
+                  title="Delete file"
+                >
+                  🗑
+                </button>
+              </div>
             )}
           </li>
         ))}
-        {!folder.files.length && <li className="text-xs text-slate-500">No files in this folder yet.</li>}
+        {!orderedFiles.length && <li className="text-xs text-slate-500">No files in this folder yet.</li>}
       </ul>
     </section>
   );
+}
+
+function moveFile(files: FolderFile[], fromIndex: number, toIndex: number): FolderFile[] {
+  const cloned = [...files];
+  const [picked] = cloned.splice(fromIndex, 1);
+  if (!picked) {
+    return files;
+  }
+  cloned.splice(toIndex, 0, picked);
+  return cloned;
 }

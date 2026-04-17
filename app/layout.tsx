@@ -3,6 +3,8 @@ import "@/app/globals.css";
 import { AppProviders } from "@/lib/providers";
 import { ProtectedRoute } from "@/components/protected-route";
 import { Navbar } from "@/components/navbar";
+import { Suspense } from "react";
+import { MainShell } from "@/components/main-shell";
 
 export const metadata: Metadata = {
   title: "PDF Management",
@@ -24,7 +26,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <AppProviders>
           <ProtectedRoute>
             <Navbar />
-            <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>
+            <Suspense fallback={<main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>}>
+              <MainShell>{children}</MainShell>
+            </Suspense>
           </ProtectedRoute>
         </AppProviders>
       </body>

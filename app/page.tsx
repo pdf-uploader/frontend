@@ -1,6 +1,16 @@
+"use client";
+
 import { FolderBrowser } from "@/components/folder-browser";
+import { HomeScrollSequence } from "@/components/home-scroll-sequence";
+import { useAuth } from "@/lib/hooks/use-auth";
 
 export default function HomePage() {
+  const { token } = useAuth();
+
+  if (!token) {
+    return <HomeScrollSequence loginHref="/login" />;
+  }
+
   return (
     <section className="space-y-4">
       <div>

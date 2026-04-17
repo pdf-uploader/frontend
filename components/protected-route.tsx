@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { ReactNode } from "react";
 
-const PUBLIC_ROUTES = new Set(["/login"]);
+const PUBLIC_ROUTES = new Set(["/", "/login"]);
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const pathname = usePathname();

@@ -38,31 +38,35 @@ export default function LoginPage() {
   })();
 
   return (
-    <div className="mx-auto mt-20 max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h1 className="mb-1 text-xl font-semibold">Sign in</h1>
-      <p className="mb-5 text-sm text-slate-600">Access your PDF management workspace.</p>
-      <form onSubmit={onSubmit} className="space-y-4">
-        <input
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="Email"
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-          required
-        />
-        <input
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          placeholder="Password"
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-          required
-        />
-        <button disabled={loginMutation.isPending} className="w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">
-          {loginMutation.isPending ? "Signing in..." : "Sign in"}
-        </button>
-      </form>
-      {loginMutation.error && <p className="mt-3 text-sm text-red-600">{loginErrorMessage}</p>}
+    <div className="mx-auto mt-20 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h1 className="mb-1 text-xl font-semibold">Sign in</h1>
+        <p className="mb-5 text-sm text-slate-600">Access your PDF management workspace.</p>
+        <form onSubmit={onSubmit} className="space-y-4">
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="Email"
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Password"
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          />
+          <button
+            type="submit"
+            disabled={loginMutation.isPending}
+            className="w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white"
+          >
+            {loginMutation.isPending ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
+        {loginMutation.error && <p className="mt-3 text-sm text-red-600">{loginErrorMessage}</p>}
     </div>
   );
 }

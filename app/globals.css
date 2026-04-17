@@ -6,10 +6,42 @@
   color-scheme: light;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+html.hide-browser-scrollbar,
+body.hide-browser-scrollbar {
+  overflow: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html.hide-browser-scrollbar::-webkit-scrollbar,
+body.hide-browser-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 body {
   @apply bg-slate-50 text-slate-900 antialiased;
 }
 
 a {
   @apply text-inherit no-underline;
+}
+
+@keyframes logoFloat {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.logo-float {
+  animation: logoFloat 4s ease-in-out infinite;
 }
