@@ -5,10 +5,23 @@ import { ProtectedRoute } from "@/components/protected-route";
 import { Navbar } from "@/components/navbar";
 import { Suspense } from "react";
 import { MainShell } from "@/components/main-shell";
+import { PWARegister } from "@/components/pwa-register";
 
 export const metadata: Metadata = {
   title: "PDF Management",
   description: "PDF management and search frontend",
+  manifest: "/mainfest.json",
+  applicationName: "Interactive PDF Manager",
+  appleWebApp: {
+    capable: true,
+    title: "PDF Manager",
+    statusBarStyle: "black-translucent",
+  },
+  icons: {
+    icon: "/app-icon.png",
+    apple: "/app-icon.png",
+    shortcut: "/app-icon.png",
+  },
 };
 
 export const viewport: Viewport = {
@@ -17,6 +30,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
+  themeColor: "#0f172a",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -24,6 +38,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body>
         <AppProviders>
+          <PWARegister />
           <ProtectedRoute>
             <Navbar />
             <Suspense fallback={<main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>}>
