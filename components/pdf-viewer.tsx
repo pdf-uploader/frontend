@@ -51,18 +51,20 @@ export function PDFViewer({
   } | null>(null);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
+  const [isCoarsePointer, setIsCoarsePointer] = useState(false);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const flipTimerRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const normalizedKeyword = highlightEnabled ? keyword.trim().toLowerCase() : "";
   const bookmarkedSet = useMemo(() => new Set(bookmarkedPages), [bookmarkedPages]);
   const FLIP_DURATION = 460;
-  const isMobileView = viewportWidth > 0 && viewportWidth < MOBILE_BREAKPOINT;
+  const isSinglePageView =
+    (viewportWidth > 0 && viewportWidth < MOBILE_BREAKPOINT) || (viewportWidth > 0 && isCoarsePointer);
   const effectiveDesktopLeftPage = toSpreadStart(currentPage);
-  const leftPage = isMobileView ? currentPage : effectiveDesktopLeftPage;
-  const rightPage = !isMobileView && effectiveDesktopLeftPage + 1 <= numPages ? effectiveDesktopLeftPage + 1 : null;
-  const isMobileFullscreen = isFullscreen && isMobileView;
-  const pageWidth = isMobileView
+  const leftPage = isSinglePageView ? currentPage : effectiveDesktopLeftPage;
+  const rightPage = !isSinglePageView && effectiveDesktopLeftPage + 1 <= numPages ? effectiveDesktopLeftPage + 1 : null;
+  const isSinglePageFullscreen = isFullscreen && isSinglePageView;
+  const pageWidth = isSinglePageView
     ? clampNumber(
         Math.floor(viewportWidth - (isFullscreen ? 8 : 56)),
         240,
@@ -71,7 +73,7 @@ export function PDFViewer({
     : isFullscreen
       ? clampNumber(Math.floor((viewportWidth - 8) / 2), 320, 1800)
       : BOOK_PAGE_WIDTH;
-  const pageHeight = isMobileFullscreen ? clampNumber(Math.floor(viewportHeight - 6), 240, 2600) : undefined;
+  const pageHeight = isSinglePageFullscreen ? clampNumber(Math.floor(viewportHeight - 6), 240, 2600) : undefined;
 
   useEffect(() => {
     if (!numPages) {
@@ -102,6 +104,7 @@ export function PDFViewer({
       }
       setViewportWidth(viewportRef.current.clientWidth);
       setViewportHeight(viewportRef.current.clientHeight);
+      setIsCoarsePointer(window.matchMedia("(pointer: coarse)").matches);
     };
 
     updateViewportWidth();
@@ -114,7 +117,7 @@ export function PDFViewer({
   }, []);
 
   useEffect(() => {
-    if (!isMobileView) {
+    if (!isSinglePageView) {
       return;
     }
 
@@ -144,7 +147,7 @@ export function PDFViewer({
       currentViewport.removeEventListener("touchstart", preventPinchZoom);
       currentViewport.removeEventListener("touchend", preventDoubleTapZoom);
     };
-  }, [isMobileView]);
+  }, [isSinglePageView]);
 
   useEffect(() => {
     return () => {
@@ -154,15 +157,15 @@ export function PDFViewer({
     };
   }, []);
 
-  const canFlipNext = isMobileView ? currentPage < numPages : effectiveDesktopLeftPage + 2 <= numPages;
-  const canFlipPrev = isMobileView ? currentPage > 1 : effectiveDesktopLeftPage > 1;
+  const canFlipNext = isSinglePageView ? currentPage < numPages : effectiveDesktopLeftPage + 2 <= numPages;
+  const canFlipPrev = isSinglePageView ? currentPage > 1 : effectiveDesktopLeftPage > 1;
 
   const goToNextSpread = () => {
     if (!canFlipNext || flipDirection) {
       return;
     }
     setFlipDirection("next");
-    if (isMobileView) {
+    if (isSinglePageView) {
       const targetPage = Math.min(numPages, currentPage + 1);
       setMobileTransition({ from: currentPage, to: targetPage, direction: "next" });
       flipTimerRef.current = window.setTimeout(() => {
@@ -183,7 +186,7 @@ export function PDFViewer({
       return;
     }
     setFlipDirection("prev");
-    if (isMobileView) {
+    if (isSinglePageView) {
       const targetPage = Math.max(1, currentPage - 1);
       setMobileTransition({ from: currentPage, to: targetPage, direction: "prev" });
       flipTimerRef.current = window.setTimeout(() => {
@@ -249,7 +252,7 @@ export function PDFViewer({
           ...(!isFullscreen ? getCoverSurfaceStyle(coverTone) : {}),
         }}
         onWheel={(event) => {
-          if (isMobileView) {
+          if (isSinglePageView) {
             return;
           }
           event.preventDefault();
@@ -264,13 +267,13 @@ export function PDFViewer({
           }
         }}
         onTouchStart={(event) => {
-          if (!isMobileView) {
+          if (!isSinglePageView) {
             return;
           }
           setTouchStartX(event.touches[0]?.clientX ?? null);
         }}
         onTouchEnd={(event) => {
-          if (!isMobileView || touchStartX === null || flipDirection) {
+          if (!isSinglePageView || touchStartX === null || flipDirection) {
             return;
           }
           const touchEndX = event.changedTouches[0]?.clientX;
@@ -289,8 +292,8 @@ export function PDFViewer({
           setTouchStartX(null);
         }}
       >
-        {!isMobileView && <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/70" />}
-        {!isMobileView && (
+        {!isSinglePageView && <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/70" />}
+        {!isSinglePageView && (
           <div className="pointer-events-none absolute inset-y-0 left-1/2 w-10 -translate-x-1/2 bg-gradient-to-r from-slate-300/25 via-slate-400/30 to-slate-300/25 blur-lg" />
         )}
         <div className={["grid grid-cols-1 gap-3 lg:grid-cols-2", isFullscreen ? "h-full w-full gap-0" : ""].join(" ")}>
@@ -302,10 +305,10 @@ export function PDFViewer({
             normalizedKeyword={normalizedKeyword}
             pageWidth={pageWidth}
             pageHeight={pageHeight}
-            isMobileView={isMobileView}
+            isMobileView={isSinglePageView}
             isFullscreen={isFullscreen}
-            mobileIncomingPage={isMobileView ? mobileTransition?.to ?? null : null}
-            mobileTransitionDirection={isMobileView ? mobileTransition?.direction ?? null : null}
+            mobileIncomingPage={isSinglePageView ? mobileTransition?.to ?? null : null}
+            mobileTransitionDirection={isSinglePageView ? mobileTransition?.direction ?? null : null}
             onNavigatePrev={goToPrevSpread}
             onNavigateNext={goToNextSpread}
           />
@@ -318,7 +321,7 @@ export function PDFViewer({
               normalizedKeyword={normalizedKeyword}
               pageWidth={pageWidth}
               pageHeight={pageHeight}
-              isMobileView={isMobileView}
+              isMobileView={isSinglePageView}
               isFullscreen={isFullscreen}
               onNavigatePrev={goToPrevSpread}
               onNavigateNext={goToNextSpread}
@@ -352,10 +355,10 @@ export function PDFViewer({
             disabled={!canFlipPrev || Boolean(flipDirection)}
             className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {isMobileView ? "Previous page" : "Previous spread"}
+            {isSinglePageView ? "Previous page" : "Previous spread"}
           </button>
           <p className="text-xs text-slate-500">
-            {isMobileView
+            {isSinglePageView
               ? "Tap left/right side, swipe, or use buttons to navigate pages"
               : "Scroll or click left/right page edges to flip"}
           </p>
@@ -365,7 +368,7 @@ export function PDFViewer({
             disabled={!canFlipNext || Boolean(flipDirection)}
             className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {isMobileView ? "Next page" : "Next spread"}
+            {isSinglePageView ? "Next page" : "Next spread"}
           </button>
         </div>
       )}

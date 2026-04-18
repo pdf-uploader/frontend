@@ -58,9 +58,13 @@ export default function FileViewerPage() {
   const [coverTone, setCoverTone] = useState<CoverToneId>("slate");
   const [hoveredPanel, setHoveredPanel] = useState<PopoverPanelId>(null);
   const [pinnedPanel, setPinnedPanel] = useState<PopoverPanelId>(null);
+  const [showFullscreenMenu, setShowFullscreenMenu] = useState(false);
+  const [isCoarsePointer, setIsCoarsePointer] = useState(false);
   const [visiblePages, setVisiblePages] = useState<number[]>([]);
   const [bookmarkTargetPage, setBookmarkTargetPage] = useState<number | null>(null);
   const viewerSectionRef = useRef<HTMLElement | null>(null);
+  const lastTapTimeRef = useRef(0);
+  const hideFullscreenMenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFullscreen = isNativeFullscreen || isPseudoFullscreen;
 
   const fileQuery = useQuery({
@@ -215,7 +219,20 @@ export default function FileViewerPage() {
   useEffect(() => {
     setHoveredPanel(null);
     setPinnedPanel(null);
+    setShowFullscreenMenu(false);
   }, [isFullscreen]);
+
+  useEffect(() => {
+    setIsCoarsePointer(window.matchMedia("(pointer: coarse)").matches);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (hideFullscreenMenuTimerRef.current) {
+        clearTimeout(hideFullscreenMenuTimerRef.current);
+      }
+    };
+  }, []);
 
   const displayFilename = useMemo(
     () => fileQuery.data?.filename || `file-${fileId}.pdf`,
@@ -319,9 +336,42 @@ export default function FileViewerPage() {
     setPinnedPanel((previous) => (previous === "settings" ? null : "settings"));
   };
 
+  const revealFullscreenMenuTemporarily = () => {
+    setShowFullscreenMenu(true);
+    if (hideFullscreenMenuTimerRef.current) {
+      clearTimeout(hideFullscreenMenuTimerRef.current);
+    }
+    hideFullscreenMenuTimerRef.current = setTimeout(() => {
+      setShowFullscreenMenu(false);
+    }, 3200);
+  };
+
+  const onFullscreenSurfaceDoubleActivate = () => {
+    if (!isFullscreen) {
+      return;
+    }
+    revealFullscreenMenuTemporarily();
+  };
+
+  const onFullscreenTouchEndCapture = () => {
+    if (!isFullscreen || !isCoarsePointer) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastTapTimeRef.current < 320) {
+      lastTapTimeRef.current = 0;
+      onFullscreenSurfaceDoubleActivate();
+      return;
+    }
+    lastTapTimeRef.current = now;
+  };
+
   return (
     <section
       ref={viewerSectionRef}
+      onDoubleClick={onFullscreenSurfaceDoubleActivate}
+      onTouchEndCapture={onFullscreenTouchEndCapture}
       className={[
         "space-y-4",
         isPseudoFullscreen ? "fixed inset-0 z-50 flex h-[100dvh] overflow-hidden bg-slate-950 text-white" : "",
@@ -339,7 +389,14 @@ export default function FileViewerPage() {
         {isFullscreen ? (
           <>
             <div className="peer absolute inset-x-0 top-0 z-20 h-16" />
-            <div className="pointer-events-none absolute left-1/2 top-2 z-30 flex w-max -translate-x-1/2 -translate-y-3 flex-col items-center gap-2 opacity-0 transition-all duration-200 peer-hover:pointer-events-auto peer-hover:translate-y-0 peer-hover:opacity-100 hover:pointer-events-auto hover:translate-y-0 hover:opacity-100">
+            <div
+              className={[
+                "absolute left-1/2 top-2 z-30 flex w-max -translate-x-1/2 -translate-y-3 flex-col items-center gap-2 transition-all duration-200 peer-hover:pointer-events-auto peer-hover:translate-y-0 peer-hover:opacity-100 hover:pointer-events-auto hover:translate-y-0 hover:opacity-100",
+                showFullscreenMenu
+                  ? "pointer-events-auto translate-y-0 opacity-100"
+                  : "pointer-events-none opacity-0",
+              ].join(" ")}
+            >
               <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/70 p-1.5 backdrop-blur">
                 <div
                   className="relative"
