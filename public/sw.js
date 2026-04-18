@@ -1,4 +1,4 @@
-const CACHE_NAME = "interactive-pdf-cache-v1";
+const CACHE_NAME = "interactive-pdf-cache-v2";
 const APP_SHELL = ["/", "/mainfest.json", "/app-icon.png"];
 
 self.addEventListener("install", (event) => {
@@ -22,6 +22,12 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") {
     return;
@@ -33,35 +39,57 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (event.request.mode === "navigate") {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("/", responseClone));
-          return response;
-        })
-        .catch(async () => {
-          const cache = await caches.open(CACHE_NAME);
-          return cache.match("/") || Response.error();
-        })
-    );
+    event.respondWith(networkFirst(event.request, "/"));
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
+  if (requestUrl.pathname.startsWith("/_next/")) {
+    event.respondWith(networkFirst(event.request));
+    return;
+  }
 
-      return fetch(event.request).then((response) => {
-        if (!response || response.status !== 200 || response.type !== "basic") {
-          return response;
-        }
-        const responseClone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
-        return response;
-      });
-    })
-  );
+  if (event.request.destination === "image" || event.request.destination === "font") {
+    event.respondWith(staleWhileRevalidate(event.request));
+    return;
+  }
+
+  event.respondWith(networkFirst(event.request));
 });
+
+async function networkFirst(request, fallbackPath) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const response = await fetch(request);
+    if (response && response.status === 200 && response.type === "basic") {
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    const cached = await cache.match(request);
+    if (cached) {
+      return cached;
+    }
+    if (fallbackPath) {
+      const fallback = await cache.match(fallbackPath);
+      if (fallback) {
+        return fallback;
+      }
+    }
+    return Response.error();
+  }
+}
+
+async function staleWhileRevalidate(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+  const networkPromise = fetch(request)
+    .then((response) => {
+      if (response && response.status === 200 && response.type === "basic") {
+        cache.put(request, response.clone());
+      }
+      return response;
+    })
+    .catch(() => null);
+
+  return cached || networkPromise || Response.error();
+}
