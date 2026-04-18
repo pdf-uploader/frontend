@@ -59,7 +59,7 @@ export default function FileViewerPage() {
   const [hoveredPanel, setHoveredPanel] = useState<PopoverPanelId>(null);
   const [pinnedPanel, setPinnedPanel] = useState<PopoverPanelId>(null);
   const [showFullscreenMenu, setShowFullscreenMenu] = useState(false);
-  const [isCoarsePointer, setIsCoarsePointer] = useState(false);
+  const [isTouchLikeInput, setIsTouchLikeInput] = useState(false);
   const [visiblePages, setVisiblePages] = useState<number[]>([]);
   const [bookmarkTargetPage, setBookmarkTargetPage] = useState<number | null>(null);
   const viewerSectionRef = useRef<HTMLElement | null>(null);
@@ -223,7 +223,7 @@ export default function FileViewerPage() {
   }, [isFullscreen]);
 
   useEffect(() => {
-    setIsCoarsePointer(window.matchMedia("(pointer: coarse)").matches);
+    setIsTouchLikeInput(window.matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0);
   }, []);
 
   useEffect(() => {
@@ -354,7 +354,7 @@ export default function FileViewerPage() {
   };
 
   const onFullscreenTouchEndCapture = () => {
-    if (!isFullscreen || !isCoarsePointer) {
+    if (!isFullscreen || !isTouchLikeInput) {
       return;
     }
 

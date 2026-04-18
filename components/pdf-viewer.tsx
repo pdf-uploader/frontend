@@ -39,6 +39,7 @@ export function PDFViewer({
   bookmarkedPages = [],
 }: PDFViewerProps) {
   const MOBILE_BREAKPOINT = 1024;
+  const TOUCH_DESKTOP_BREAKPOINT = 1280;
   const BOOK_PAGE_WIDTH = 520;
   const MOBILE_PAGE_MAX_WIDTH = 700;
   const [numPages, setNumPages] = useState(0);
@@ -52,6 +53,8 @@ export function PDFViewer({
   const [viewportWidth, setViewportWidth] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [isCoarsePointer, setIsCoarsePointer] = useState(false);
+  const [hasTouchInput, setHasTouchInput] = useState(false);
+  const [isStandalonePwa, setIsStandalonePwa] = useState(false);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const flipTimerRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -59,7 +62,10 @@ export function PDFViewer({
   const bookmarkedSet = useMemo(() => new Set(bookmarkedPages), [bookmarkedPages]);
   const FLIP_DURATION = 460;
   const isSinglePageView =
-    (viewportWidth > 0 && viewportWidth < MOBILE_BREAKPOINT) || (viewportWidth > 0 && isCoarsePointer);
+    viewportWidth > 0 &&
+    (viewportWidth < MOBILE_BREAKPOINT ||
+      isStandalonePwa ||
+      ((isCoarsePointer || hasTouchInput) && viewportWidth < TOUCH_DESKTOP_BREAKPOINT));
   const effectiveDesktopLeftPage = toSpreadStart(currentPage);
   const leftPage = isSinglePageView ? currentPage : effectiveDesktopLeftPage;
   const rightPage = !isSinglePageView && effectiveDesktopLeftPage + 1 <= numPages ? effectiveDesktopLeftPage + 1 : null;
@@ -105,6 +111,8 @@ export function PDFViewer({
       setViewportWidth(viewportRef.current.clientWidth);
       setViewportHeight(viewportRef.current.clientHeight);
       setIsCoarsePointer(window.matchMedia("(pointer: coarse)").matches);
+      setHasTouchInput(window.matchMedia("(hover: none)").matches || navigator.maxTouchPoints > 0);
+      setIsStandalonePwa(isStandaloneDisplayMode());
     };
 
     updateViewportWidth();
@@ -697,4 +705,14 @@ function escapeRegExp(value: string): string {
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function isStandaloneDisplayMode(): boolean {
+  const browserStandalone =
+    typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches;
+  const iosStandalone =
+    typeof navigator !== "undefined" &&
+    "standalone" in navigator &&
+    Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+  return browserStandalone || iosStandalone;
 }
