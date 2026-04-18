@@ -1,13 +1,19 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { FolderBrowser } from "@/components/folder-browser";
 import { HomeScrollSequence } from "@/components/home-scroll-sequence";
 import { useAuth } from "@/lib/hooks/use-auth";
 
 export default function HomePage() {
   const { token } = useAuth();
+  const [isHydrated, setIsHydrated] = useState(false);
 
-  if (!token) {
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
+
+  if (!isHydrated || !token) {
     return <HomeScrollSequence loginHref="/login" />;
   }
 

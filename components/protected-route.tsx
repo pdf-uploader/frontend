@@ -15,7 +15,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!token && !isPublic) {
-      router.replace("/login");
+      router.replace("/");
     }
     if (token && pathname === "/login") {
       router.replace("/");

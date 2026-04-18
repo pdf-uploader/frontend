@@ -14,7 +14,7 @@ export function Navbar() {
   const logoutMutation = useMutation({
     mutationFn: signOut,
     onSettled: () => {
-      router.replace("/login");
+      router.replace("/");
     },
   });
 

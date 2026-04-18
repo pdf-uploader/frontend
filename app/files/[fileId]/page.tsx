@@ -16,6 +16,30 @@ const PDFViewer = dynamic(() => import("@/components/pdf-viewer").then((mod) => 
   loading: () => <p className="text-sm text-slate-600">Loading PDF viewer...</p>,
 });
 
+type BookmarkColorId = "silver" | "sand" | "ice" | "sage";
+type PageToneId = "white" | "ivory" | "mist";
+type CoverToneId = "slate" | "stone" | "forest";
+type PopoverPanelId = "bookmark" | "settings" | null;
+
+const BOOKMARK_COLOR_OPTIONS: Array<{ id: BookmarkColorId; label: string; swatch: string }> = [
+  { id: "silver", label: "Silver", swatch: "#dfe1e5" },
+  { id: "sand", label: "Sand", swatch: "#e8dfd2" },
+  { id: "ice", label: "Ice", swatch: "#d7e4ec" },
+  { id: "sage", label: "Sage", swatch: "#e2e7dc" },
+];
+
+const PAGE_TONE_OPTIONS: Array<{ id: PageToneId; label: string; swatch: string }> = [
+  { id: "white", label: "White", swatch: "#ffffff" },
+  { id: "ivory", label: "Ivory", swatch: "#f8f2e6" },
+  { id: "mist", label: "Mist", swatch: "#f2f5fb" },
+];
+
+const COVER_TONE_OPTIONS: Array<{ id: CoverToneId; label: string; swatch: string }> = [
+  { id: "slate", label: "Slate", swatch: "#e2e8f0" },
+  { id: "stone", label: "Stone", swatch: "#e7ddd2" },
+  { id: "forest", label: "Forest", swatch: "#dbe5d8" },
+];
+
 export default function FileViewerPage() {
   const params = useParams<{ fileId: string }>();
   const searchParams = useSearchParams();
@@ -29,6 +53,13 @@ export default function FileViewerPage() {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   const [isPseudoFullscreen, setIsPseudoFullscreen] = useState(false);
+  const [bookmarkColor, setBookmarkColor] = useState<BookmarkColorId>("silver");
+  const [pageTone, setPageTone] = useState<PageToneId>("white");
+  const [coverTone, setCoverTone] = useState<CoverToneId>("slate");
+  const [hoveredPanel, setHoveredPanel] = useState<PopoverPanelId>(null);
+  const [pinnedPanel, setPinnedPanel] = useState<PopoverPanelId>(null);
+  const [visiblePages, setVisiblePages] = useState<number[]>([]);
+  const [bookmarkTargetPage, setBookmarkTargetPage] = useState<number | null>(null);
   const viewerSectionRef = useRef<HTMLElement | null>(null);
   const isFullscreen = isNativeFullscreen || isPseudoFullscreen;
 
@@ -89,6 +120,45 @@ export default function FileViewerPage() {
   }, [bookmarkedPages, fileId]);
 
   useEffect(() => {
+    const storedColor = window.localStorage.getItem(getBookmarkColorStorageKey(fileId));
+    if (!storedColor || !isBookmarkColorId(storedColor)) {
+      setBookmarkColor("silver");
+      return;
+    }
+    setBookmarkColor(storedColor);
+  }, [fileId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(getBookmarkColorStorageKey(fileId), bookmarkColor);
+  }, [bookmarkColor, fileId]);
+
+  useEffect(() => {
+    const storedPageTone = window.localStorage.getItem(getPageToneStorageKey(fileId));
+    if (!storedPageTone || !isPageToneId(storedPageTone)) {
+      setPageTone("white");
+      return;
+    }
+    setPageTone(storedPageTone);
+  }, [fileId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(getPageToneStorageKey(fileId), pageTone);
+  }, [fileId, pageTone]);
+
+  useEffect(() => {
+    const storedCoverTone = window.localStorage.getItem(getCoverToneStorageKey(fileId));
+    if (!storedCoverTone || !isCoverToneId(storedCoverTone)) {
+      setCoverTone("slate");
+      return;
+    }
+    setCoverTone(storedCoverTone);
+  }, [fileId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(getCoverToneStorageKey(fileId), coverTone);
+  }, [coverTone, fileId]);
+
+  useEffect(() => {
     const onFullscreenChange = () => {
       const inFullscreen = document.fullscreenElement === viewerSectionRef.current;
       setIsNativeFullscreen(inFullscreen);
@@ -127,6 +197,25 @@ export default function FileViewerPage() {
       document.documentElement.style.overflow = originalHtmlOverflow;
     };
   }, [isPseudoFullscreen]);
+
+  useEffect(() => {
+    if (!visiblePages.length) {
+      setBookmarkTargetPage(null);
+      return;
+    }
+
+    setBookmarkTargetPage((previous) => {
+      if (previous && visiblePages.includes(previous)) {
+        return previous;
+      }
+      return visiblePages[0];
+    });
+  }, [visiblePages]);
+
+  useEffect(() => {
+    setHoveredPanel(null);
+    setPinnedPanel(null);
+  }, [isFullscreen]);
 
   const displayFilename = useMemo(
     () => fileQuery.data?.filename || `file-${fileId}.pdf`,
@@ -184,8 +273,6 @@ export default function FileViewerPage() {
     });
   };
 
-  const isCurrentPageBookmarked = bookmarkedPages.includes(currentPage);
-
   const toggleFullscreen = async () => {
     if (!viewerSectionRef.current) {
       return;
@@ -211,6 +298,27 @@ export default function FileViewerPage() {
     setIsPseudoFullscreen(true);
   };
 
+  const selectedBookmarkPage = bookmarkTargetPage ?? currentPage;
+  const isSelectedPageBookmarked = bookmarkedPages.includes(selectedBookmarkPage);
+  const canChooseBookmarkPage = visiblePages.length > 0;
+  const bookmarkButtonLabel = "Bookmark";
+  const bookmarkButtonStyle = getBookmarkButtonStyle(bookmarkColor, isSelectedPageBookmarked);
+  const showBookmarkPagePicker = (hoveredPanel === "bookmark" || pinnedPanel === "bookmark") && canChooseBookmarkPage;
+  const showBookmarkSettings = hoveredPanel === "settings" || pinnedPanel === "settings";
+
+  const onBookmarkPrimaryAction = () => {
+    setPinnedPanel((previous) => (previous === "bookmark" ? null : "bookmark"));
+  };
+
+  const onChooseBookmarkPage = (pageNumber: number) => {
+    setBookmarkTargetPage(pageNumber);
+    toggleBookmark(pageNumber);
+  };
+
+  const onToggleSettings = () => {
+    setPinnedPanel((previous) => (previous === "settings" ? null : "settings"));
+  };
+
   return (
     <section
       ref={viewerSectionRef}
@@ -228,55 +336,81 @@ export default function FileViewerPage() {
             : "border-slate-200 bg-white",
         ].join(" ")}
       >
-        <div
-          className={[
-            isFullscreen
-              ? "absolute left-2 right-2 top-2 z-20 flex items-center justify-end gap-2 rounded-xl border border-slate-700/80 bg-slate-900/70 p-1.5 backdrop-blur sm:left-4 sm:right-4 sm:justify-between"
-              : "mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between",
-          ].join(" ")}
-        >
-          <div className={["min-w-0 space-y-1", isFullscreen ? "hidden" : ""].join(" ")}>
-            <Link href="/" className={["inline-flex text-xs font-medium hover:underline", isFullscreen ? "text-blue-300" : "text-blue-700"].join(" ")}>
-              ← Back to library
-            </Link>
-            <h1 className={["truncate text-base font-semibold sm:text-lg", isFullscreen ? "text-white max-w-[78vw] text-sm sm:max-w-[60vw] sm:text-base" : "text-slate-900"].join(" ")}>{displayFilename}</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            {isFullscreen && (
+        {isFullscreen ? (
+          <>
+            <div className="peer absolute inset-x-0 top-0 z-20 h-16" />
+            <div className="pointer-events-none absolute left-1/2 top-2 z-30 flex w-max -translate-x-1/2 -translate-y-3 flex-col items-center gap-2 opacity-0 transition-all duration-200 peer-hover:pointer-events-auto peer-hover:translate-y-0 peer-hover:opacity-100 hover:pointer-events-auto hover:translate-y-0 hover:opacity-100">
+              <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/70 p-1.5 backdrop-blur">
+                <div
+                  className="relative"
+                  onMouseEnter={() => setHoveredPanel("bookmark")}
+                  onMouseLeave={() => setHoveredPanel((previous) => (previous === "bookmark" ? null : previous))}
+                >
+                  <button
+                    type="button"
+                    onClick={onBookmarkPrimaryAction}
+                    className="rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition"
+                    style={bookmarkButtonStyle}
+                  >
+                    {bookmarkButtonLabel}
+                  </button>
+                  {showBookmarkPagePicker && canChooseBookmarkPage && (
+                    <div className="absolute left-1/2 top-[calc(100%+8px)] z-40 flex -translate-x-1/2 items-center gap-1 rounded-md border border-slate-600 bg-slate-900/95 p-1.5 shadow-xl backdrop-blur">
+                      {visiblePages.map((pageNumber) => {
+                        const selected = selectedBookmarkPage === pageNumber;
+                        const alreadyBookmarked = bookmarkedPages.includes(pageNumber);
+                        return (
+                          <button
+                            key={`bookmark-target-fullscreen-${pageNumber}`}
+                            type="button"
+                            onClick={() => onChooseBookmarkPage(pageNumber)}
+                            className={[
+                              "rounded px-2 py-1 text-[11px] font-medium transition",
+                              selected ? "bg-slate-100 text-slate-900" : "text-slate-100 hover:bg-slate-700",
+                            ].join(" ")}
+                          >
+                            {alreadyBookmarked ? `Page ${pageNumber} ✓` : `Page ${pageNumber}`}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void toggleFullscreen()}
+                  className="rounded-md border border-slate-500 bg-slate-800 px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-slate-700"
+                >
+                  Exit full screen
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 space-y-1">
+              <Link href="/" className="inline-flex text-xs font-medium text-blue-700 hover:underline">
+                ← Back to library
+              </Link>
+              <h1 className="truncate text-base font-semibold text-slate-900 sm:text-lg">{displayFilename}</h1>
+            </div>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => toggleBookmark(currentPage)}
-                className={[
-                  "rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition",
-                  isCurrentPageBookmarked
-                    ? "bg-fuchsia-600 text-white hover:bg-fuchsia-500"
-                    : "border border-slate-500 bg-slate-800 text-white hover:bg-slate-700",
-                ].join(" ")}
+                onClick={() => void toggleFullscreen()}
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
               >
-                {isCurrentPageBookmarked ? "Bookmarked" : "Bookmark"}
+                Full screen
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => void toggleFullscreen()}
-              className={[
-                "rounded-md px-3 py-2 text-xs font-medium",
-                isFullscreen ? "border border-slate-500 bg-slate-800 text-white hover:bg-slate-700 sm:px-2.5 sm:py-1.5 sm:text-[11px]" : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
-              ].join(" ")}
-            >
-              {isFullscreen ? "Exit full screen" : "Full screen"}
-            </button>
-            <button
-              onClick={onDownload}
-              className={[
-                "rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700",
-                isFullscreen ? "hidden" : "",
-              ].join(" ")}
-            >
-              Download PDF
-            </button>
+              <button
+                onClick={onDownload}
+                className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700"
+              >
+                Download PDF
+              </button>
+            </div>
           </div>
-        </div>
+        )}
         {!isFullscreen && (
           <div
             className={[
@@ -295,18 +429,126 @@ export default function FileViewerPage() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => toggleBookmark(currentPage)}
-                className={[
-                  "rounded-lg px-3 py-2 text-xs font-semibold transition",
-                  isCurrentPageBookmarked
-                    ? "bg-fuchsia-600 text-white hover:bg-fuchsia-500"
-                    : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
-                ].join(" ")}
+              <div
+                className="relative"
+                onMouseEnter={() => setHoveredPanel("bookmark")}
+                onMouseLeave={() => setHoveredPanel((previous) => (previous === "bookmark" ? null : previous))}
               >
-                {isCurrentPageBookmarked ? "Remove bookmark" : "Bookmark this page"}
-              </button>
+                <button
+                  type="button"
+                  onClick={onBookmarkPrimaryAction}
+                  className="rounded-lg px-3 py-2 text-xs font-semibold transition"
+                  style={bookmarkButtonStyle}
+                >
+                  {bookmarkButtonLabel}
+                </button>
+                {showBookmarkPagePicker && canChooseBookmarkPage && (
+                  <div className="absolute right-0 top-[calc(100%+8px)] z-20 flex items-center gap-1 rounded-lg border border-slate-300 bg-white p-1 shadow-lg">
+                    {visiblePages.map((pageNumber) => {
+                      const selected = selectedBookmarkPage === pageNumber;
+                      const alreadyBookmarked = bookmarkedPages.includes(pageNumber);
+                      return (
+                        <button
+                          key={`bookmark-target-default-${pageNumber}`}
+                          type="button"
+                          onClick={() => onChooseBookmarkPage(pageNumber)}
+                          className={[
+                            "rounded-md px-2 py-1 text-xs font-medium transition",
+                            selected ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100",
+                          ].join(" ")}
+                        >
+                          {alreadyBookmarked ? `Page ${pageNumber} ✓` : `Page ${pageNumber}`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div
+                className="relative"
+                onMouseEnter={() => setHoveredPanel("settings")}
+                onMouseLeave={() => setHoveredPanel((previous) => (previous === "settings" ? null : previous))}
+              >
+                <button
+                  type="button"
+                  aria-label="Bookmark settings"
+                  title="Bookmark settings"
+                  onClick={onToggleSettings}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-base text-slate-700 transition hover:bg-slate-50"
+                >
+                  ⚙
+                </button>
+                {showBookmarkSettings && (
+                  <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Bookmark color</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {BOOKMARK_COLOR_OPTIONS.map((option) => {
+                        const selected = bookmarkColor === option.id;
+                        return (
+                          <button
+                            key={`bookmark-color-default-${option.id}`}
+                            type="button"
+                            onClick={() => setBookmarkColor(option.id)}
+                            className={[
+                              "flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs transition",
+                              selected
+                                ? "border-blue-300 bg-blue-50 text-blue-700"
+                                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                            ].join(" ")}
+                          >
+                            <span className="inline-flex h-4 w-4 rounded-full border border-slate-300" style={{ backgroundColor: option.swatch }} />
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mb-2 mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Page color</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {PAGE_TONE_OPTIONS.map((option) => {
+                        const selected = pageTone === option.id;
+                        return (
+                          <button
+                            key={`page-tone-default-${option.id}`}
+                            type="button"
+                            onClick={() => setPageTone(option.id)}
+                            className={[
+                              "flex items-center justify-center gap-2 rounded-md border px-2 py-1.5 text-[11px] transition",
+                              selected
+                                ? "border-blue-300 bg-blue-50 text-blue-700"
+                                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                            ].join(" ")}
+                          >
+                            <span className="inline-flex h-3.5 w-3.5 rounded-full border border-slate-300" style={{ backgroundColor: option.swatch }} />
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mb-2 mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Book cover color</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {COVER_TONE_OPTIONS.map((option) => {
+                        const selected = coverTone === option.id;
+                        return (
+                          <button
+                            key={`cover-tone-default-${option.id}`}
+                            type="button"
+                            onClick={() => setCoverTone(option.id)}
+                            className={[
+                              "flex items-center justify-center gap-2 rounded-md border px-2 py-1.5 text-[11px] transition",
+                              selected
+                                ? "border-blue-300 bg-blue-50 text-blue-700"
+                                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                            ].join(" ")}
+                          >
+                            <span className="inline-flex h-3.5 w-3.5 rounded-full border border-slate-300" style={{ backgroundColor: option.swatch }} />
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -320,12 +562,8 @@ export default function FileViewerPage() {
                   key={page}
                   type="button"
                   onClick={() => setCurrentPage(page)}
-                  className={[
-                    "rounded-full border px-3 py-1 text-xs font-medium transition",
-                    page === currentPage
-                      ? "border-fuchsia-300 bg-fuchsia-100 text-fuchsia-700"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
-                  ].join(" ")}
+                  className="rounded-full border px-3 py-1 text-xs font-medium transition hover:brightness-95"
+                  style={getBookmarkChipStyle(bookmarkColor, page === currentPage)}
                 >
                   Page {page}
                 </button>
@@ -337,7 +575,7 @@ export default function FileViewerPage() {
         <div
           className={[
             "rounded-xl border border-slate-200 bg-slate-100 p-2 sm:p-4",
-            isFullscreen ? "flex min-h-0 flex-1 rounded-none border-0 bg-slate-950 p-0 pt-[52px]" : "min-h-[58vh] sm:min-h-[70vh]",
+            isFullscreen ? "flex min-h-0 flex-1 rounded-none border-0 bg-slate-950 p-0" : "min-h-[58vh] sm:min-h-[70vh]",
           ].join(" ")}
         >
           {blobUrl && (
@@ -345,9 +583,13 @@ export default function FileViewerPage() {
               fileUrl={blobUrl}
               activePage={currentPage}
               keyword={keyword}
+              bookmarkColor={bookmarkColor}
+              pageTone={pageTone}
+              coverTone={coverTone}
               isFullscreen={isFullscreen}
               onCurrentPageChange={setCurrentPage}
               onNumPagesChange={setTotalPages}
+              onVisiblePagesChange={setVisiblePages}
               bookmarkedPages={bookmarkedPages}
             />
           )}
@@ -382,3 +624,81 @@ function extractBackendError(error: unknown): string {
 function getBookmarkStorageKey(fileId: string): string {
   return `bookmarks:${fileId}`;
 }
+
+function getBookmarkColorStorageKey(fileId: string): string {
+  return `bookmarkColor:${fileId}`;
+}
+
+function getPageToneStorageKey(fileId: string): string {
+  return `pageTone:${fileId}`;
+}
+
+function getCoverToneStorageKey(fileId: string): string {
+  return `coverTone:${fileId}`;
+}
+
+function isBookmarkColorId(value: string): value is BookmarkColorId {
+  return BOOKMARK_COLOR_OPTIONS.some((option) => option.id === value);
+}
+
+function isPageToneId(value: string): value is PageToneId {
+  return PAGE_TONE_OPTIONS.some((option) => option.id === value);
+}
+
+function isCoverToneId(value: string): value is CoverToneId {
+  return COVER_TONE_OPTIONS.some((option) => option.id === value);
+}
+
+function getBookmarkButtonStyle(
+  color: BookmarkColorId,
+  isBookmarked: boolean
+): { border: string; backgroundColor: string; color: string } {
+  if (!isBookmarked) {
+    return {
+      border: "1px solid #cbd5e1",
+      backgroundColor: "#ffffff",
+      color: "#334155",
+    };
+  }
+
+  const tone = {
+    silver: { background: "#e2e3e6", text: "#3a4458", border: "#c5c8cf" },
+    sand: { background: "#ece5db", text: "#6f5a43", border: "#d4c7b7" },
+    ice: { background: "#dbe7ef", text: "#43627b", border: "#bfcfda" },
+    sage: { background: "#e4e8df", text: "#476046", border: "#c8d0c3" },
+  }[color];
+
+  return {
+    border: `1px solid ${tone.border}`,
+    backgroundColor: tone.background,
+    color: tone.text,
+  };
+}
+
+function getBookmarkChipStyle(color: BookmarkColorId, isActive: boolean): {
+  borderColor: string;
+  backgroundColor: string;
+  color: string;
+} {
+  const palette = {
+    silver: { active: "#eef0f4", border: "#c5c8cf", text: "#3a4458" },
+    sand: { active: "#f4eee6", border: "#d6cabd", text: "#6f5a43" },
+    ice: { active: "#eaf2f7", border: "#bfd0dc", text: "#43627b" },
+    sage: { active: "#edf2e9", border: "#c8d1c0", text: "#476046" },
+  }[color];
+
+  if (isActive) {
+    return {
+      borderColor: palette.border,
+      backgroundColor: palette.active,
+      color: palette.text,
+    };
+  }
+
+  return {
+    borderColor: "#cbd5e1",
+    backgroundColor: "#ffffff",
+    color: "#334155",
+  };
+}
+

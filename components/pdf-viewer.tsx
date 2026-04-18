@@ -9,19 +9,33 @@ interface PDFViewerProps {
   fileUrl: string;
   activePage?: number;
   keyword?: string;
+  highlightEnabled?: boolean;
+  bookmarkColor?: BookmarkColorId;
+  pageTone?: PageToneId;
+  coverTone?: CoverToneId;
   isFullscreen?: boolean;
   onCurrentPageChange?: (page: number) => void;
   onNumPagesChange?: (total: number) => void;
+  onVisiblePagesChange?: (pages: number[]) => void;
   bookmarkedPages?: number[];
 }
+
+type BookmarkColorId = "silver" | "sand" | "ice" | "sage";
+type PageToneId = "white" | "ivory" | "mist";
+type CoverToneId = "slate" | "stone" | "forest";
 
 export function PDFViewer({
   fileUrl,
   activePage = 1,
   keyword = "",
+  highlightEnabled = true,
+  bookmarkColor = "silver",
+  pageTone = "white",
+  coverTone = "slate",
   isFullscreen = false,
   onCurrentPageChange,
   onNumPagesChange,
+  onVisiblePagesChange,
   bookmarkedPages = [],
 }: PDFViewerProps) {
   const MOBILE_BREAKPOINT = 1024;
@@ -40,7 +54,7 @@ export function PDFViewer({
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const flipTimerRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const normalizedKeyword = keyword.trim().toLowerCase();
+  const normalizedKeyword = highlightEnabled ? keyword.trim().toLowerCase() : "";
   const bookmarkedSet = useMemo(() => new Set(bookmarkedPages), [bookmarkedPages]);
   const FLIP_DURATION = 460;
   const isMobileView = viewportWidth > 0 && viewportWidth < MOBILE_BREAKPOINT;
@@ -73,6 +87,13 @@ export function PDFViewer({
     }
     onCurrentPageChange(currentPage);
   }, [currentPage, onCurrentPageChange]);
+
+  useEffect(() => {
+    if (!onVisiblePagesChange) {
+      return;
+    }
+    onVisiblePagesChange(rightPage ? [leftPage, rightPage] : [leftPage]);
+  }, [leftPage, onVisiblePagesChange, rightPage]);
 
   useEffect(() => {
     const updateViewportWidth = () => {
@@ -220,9 +241,13 @@ export function PDFViewer({
           "relative overflow-hidden border touch-pan-y",
           isFullscreen
             ? "h-full w-full rounded-none border-0 bg-slate-950 p-0"
-            : "mx-auto h-auto max-w-[1120px] rounded-2xl border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-3 shadow-inner lg:h-[760px] lg:p-4",
+            : "mx-auto h-auto max-w-[1120px] rounded-2xl border-slate-200 p-3 shadow-inner lg:h-[760px] lg:p-4",
         ].join(" ")}
-        style={{ WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
+        style={{
+          WebkitUserSelect: "none",
+          WebkitTouchCallout: "none",
+          ...(!isFullscreen ? getCoverSurfaceStyle(coverTone) : {}),
+        }}
         onWheel={(event) => {
           if (isMobileView) {
             return;
@@ -272,6 +297,8 @@ export function PDFViewer({
           <BookPage
             pageNumber={leftPage}
             isBookmarked={bookmarkedSet.has(leftPage)}
+            bookmarkColor={bookmarkColor}
+            pageTone={pageTone}
             normalizedKeyword={normalizedKeyword}
             pageWidth={pageWidth}
             pageHeight={pageHeight}
@@ -286,6 +313,8 @@ export function PDFViewer({
             <BookPage
               pageNumber={rightPage}
               isBookmarked={bookmarkedSet.has(rightPage)}
+              bookmarkColor={bookmarkColor}
+              pageTone={pageTone}
               normalizedKeyword={normalizedKeyword}
               pageWidth={pageWidth}
               pageHeight={pageHeight}
@@ -426,6 +455,8 @@ interface BookPageProps {
   pageNumber: number;
   normalizedKeyword: string;
   isBookmarked: boolean;
+  bookmarkColor: BookmarkColorId;
+  pageTone: PageToneId;
   pageWidth: number;
   pageHeight?: number;
   isMobileView: boolean;
@@ -441,6 +472,8 @@ function BookPage({
   pageNumber,
   normalizedKeyword,
   isBookmarked,
+  bookmarkColor,
+  pageTone,
   pageWidth,
   pageHeight,
   isMobileView,
@@ -452,6 +485,7 @@ function BookPage({
   onNavigatePrev,
 }: BookPageProps) {
   const desktopFullscreenScale = isFullscreen && !isMobileView ? 1.4 : 1;
+  const pageSurface = getPageSurfaceStyle(pageTone);
 
   const renderPdfPage = (pageToRender: number) => (
     <Page
@@ -480,10 +514,11 @@ function BookPage({
   return (
     <div
       className={[
-        "group relative flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-sm transition hover:shadow-md",
+        "group relative flex flex-col overflow-hidden rounded-xl border border-slate-200 p-2 shadow-sm transition hover:shadow-md",
         isFullscreen ? "h-full rounded-none border-0 p-0 shadow-none" : "",
         isMobileView ? "cursor-default" : isRightPage ? "cursor-e-resize" : "cursor-w-resize",
       ].join(" ")}
+      style={!isFullscreen ? { backgroundColor: pageSurface.pageBodyColor } : undefined}
       onClick={(event) => {
         if (isMobileView) {
           const rect = event.currentTarget.getBoundingClientRect();
@@ -517,11 +552,14 @@ function BookPage({
         }
       }}
     >
-      {!isFullscreen && isBookmarked && <BookmarkRibbon />}
-      {!isFullscreen && <p className="mb-2 px-1 text-xs font-medium text-slate-500">Page {pageNumber}</p>}
+      {!isFullscreen && (
+        <div className="mb-2 px-1">
+          <p className="text-xs font-medium text-slate-500">Page {pageNumber}</p>
+        </div>
+      )}
       <div
         className={[
-          "relative flex items-start justify-center overflow-hidden rounded-md border border-slate-200 bg-slate-50",
+          "relative flex items-start justify-center overflow-hidden rounded-md border border-slate-200",
           isMobileView
             ? isFullscreen
               ? "h-full min-h-0 p-0"
@@ -530,7 +568,11 @@ function BookPage({
               ? "min-h-0 flex-1 items-center rounded-none border-0 p-0"
               : "h-[700px]",
         ].join(" ")}
+        style={{
+          backgroundColor: pageSurface.pageCanvasColor,
+        }}
       >
+        {!isFullscreen && isBookmarked && <BookmarkRibbon color={bookmarkColor} />}
         {isMobileView && mobileIncomingPage && mobileTransitionDirection ? (
           <>
             <div
@@ -545,12 +587,13 @@ function BookPage({
             </div>
             <div
               className={[
-                "absolute z-20 flex items-start justify-center bg-slate-50",
+                "absolute z-20 flex items-start justify-center",
                 isFullscreen ? "inset-0 rounded-none" : "inset-2 rounded-md",
                 mobileTransitionDirection === "next"
                   ? "animate-[mobilePageSlideInNext_460ms_ease-in-out]"
                   : "animate-[mobilePageSlideInPrev_460ms_ease-in-out]",
               ].join(" ")}
+              style={{ backgroundColor: pageSurface.pageCanvasColor }}
             >
               {renderPdfPage(mobileIncomingPage)}
             </div>
@@ -571,13 +614,70 @@ function BookPage({
   );
 }
 
-function BookmarkRibbon() {
+function BookmarkRibbon({ color }: { color: BookmarkColorId }) {
+  const source = getBookmarkImageSource(color);
+
   return (
-    <div
-      className="pointer-events-none absolute left-1/2 top-0 z-10 h-12 w-5 -translate-x-1/2 bg-fuchsia-500 shadow-md"
-      style={{ clipPath: "polygon(0 0,100% 0,100% 76%,50% 100%,0 76%)" }}
+    <img
+      src={source}
+      alt=""
+      aria-hidden="true"
+      className="pointer-events-none absolute right-0 top-0 z-20 h-10 w-auto object-contain drop-shadow-[0_2px_3px_rgba(15,23,42,0.35)]"
     />
   );
+}
+
+function getBookmarkImageSource(color: BookmarkColorId): string {
+  switch (color) {
+    case "sand":
+      return "/bookmarkers/bookmarker_sand.png";
+    case "ice":
+      return "/bookmarkers/bookmarker_ice.png";
+    case "sage":
+      return "/bookmarkers/bookmarker_sage.png";
+    case "silver":
+    default:
+      return "/bookmarkers/bookmarker_silver.png";
+  }
+}
+
+function getPageSurfaceStyle(pageTone: PageToneId): { pageBodyColor: string; pageCanvasColor: string } {
+  switch (pageTone) {
+    case "ivory":
+      return {
+        pageBodyColor: "#fcfaf4",
+        pageCanvasColor: "#f7f1e6",
+      };
+    case "mist":
+      return {
+        pageBodyColor: "#f8faff",
+        pageCanvasColor: "#eef3fb",
+      };
+    case "white":
+    default:
+      return {
+        pageBodyColor: "#ffffff",
+        pageCanvasColor: "#f8fafc",
+      };
+  }
+}
+
+function getCoverSurfaceStyle(coverTone: CoverToneId): { background: string } {
+  switch (coverTone) {
+    case "stone":
+      return {
+        background: "linear-gradient(135deg, #efe5dc 0%, #f8f3ee 48%, #e8ddd0 100%)",
+      };
+    case "forest":
+      return {
+        background: "linear-gradient(135deg, #d9e5d7 0%, #edf3eb 48%, #d0decf 100%)",
+      };
+    case "slate":
+    default:
+      return {
+        background: "linear-gradient(135deg, #e2e8f0 0%, #f8fafc 48%, #dbe3ee 100%)",
+      };
+  }
 }
 
 function clampPage(page: number, numPages: number): number {
