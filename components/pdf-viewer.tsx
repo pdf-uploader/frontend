@@ -78,6 +78,8 @@ export function PDFViewer({
   const leftPage = isSinglePageView ? currentPage : effectiveDesktopLeftPage;
   const rightPage = !isSinglePageView && effectiveDesktopLeftPage + 1 <= numPages ? effectiveDesktopLeftPage + 1 : null;
   const isSinglePageFullscreen = isFullscreen && isSinglePageView;
+  const isZoomedSinglePageFullscreen = isSinglePageFullscreen && pinchZoomScale > 1;
+  const shouldFitToFullscreenHeight = isSinglePageFullscreen && pinchZoomScale <= 1;
   const pageWidth = isSinglePageView
     ? clampNumber(
         Math.floor(viewportWidth - (isFullscreen ? 8 : 56)),
@@ -87,7 +89,7 @@ export function PDFViewer({
     : isFullscreen
       ? clampNumber(Math.floor((viewportWidth - 8) / 2), 320, 1800)
       : BOOK_PAGE_WIDTH;
-  const pageHeight = isSinglePageFullscreen ? clampNumber(Math.floor(viewportHeight - 6), 240, 2600) : undefined;
+  const pageHeight = shouldFitToFullscreenHeight ? clampNumber(Math.floor(viewportHeight - 6), 240, 2600) : undefined;
 
   useEffect(() => {
     if (!isSinglePageFullscreen) {
@@ -97,6 +99,13 @@ export function PDFViewer({
       isPinchingRef.current = false;
     }
   }, [isSinglePageFullscreen]);
+
+  useEffect(() => {
+    if (!isSinglePageFullscreen || !viewportRef.current) {
+      return;
+    }
+    viewportRef.current.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [currentPage, isSinglePageFullscreen]);
 
   useEffect(() => {
     if (!numPages) {
@@ -192,7 +201,11 @@ export function PDFViewer({
     setFlipDirection("next");
     if (isSinglePageView) {
       const targetPage = Math.min(numPages, currentPage + 1);
-      setMobileTransition({ from: currentPage, to: targetPage, direction: "next" });
+      if (isZoomedSinglePageFullscreen) {
+        setMobileTransition(null);
+      } else {
+        setMobileTransition({ from: currentPage, to: targetPage, direction: "next" });
+      }
       flipTimerRef.current = window.setTimeout(() => {
         setCurrentPage(targetPage);
         setMobileTransition(null);
@@ -213,7 +226,11 @@ export function PDFViewer({
     setFlipDirection("prev");
     if (isSinglePageView) {
       const targetPage = Math.max(1, currentPage - 1);
-      setMobileTransition({ from: currentPage, to: targetPage, direction: "prev" });
+      if (isZoomedSinglePageFullscreen) {
+        setMobileTransition(null);
+      } else {
+        setMobileTransition({ from: currentPage, to: targetPage, direction: "prev" });
+      }
       flipTimerRef.current = window.setTimeout(() => {
         setCurrentPage(targetPage);
         setMobileTransition(null);
@@ -266,7 +283,8 @@ export function PDFViewer({
       <div
         ref={viewportRef}
         className={[
-          "relative overflow-hidden border touch-pan-y",
+          "relative border touch-pan-y",
+          isZoomedSinglePageFullscreen ? "overflow-auto" : "overflow-hidden",
           isFullscreen
             ? "h-full w-full rounded-none border-0 bg-slate-950 p-0"
             : "mx-auto h-auto max-w-[1120px] rounded-2xl border-slate-200 p-3 shadow-inner lg:h-[760px] lg:p-4",
@@ -397,8 +415,10 @@ export function PDFViewer({
             pageHeight={pageHeight}
             isMobileView={isSinglePageView}
             isFullscreen={isFullscreen}
-            mobileIncomingPage={isSinglePageView ? mobileTransition?.to ?? null : null}
-            mobileTransitionDirection={isSinglePageView ? mobileTransition?.direction ?? null : null}
+            mobileIncomingPage={isSinglePageView && !isZoomedSinglePageFullscreen ? mobileTransition?.to ?? null : null}
+            mobileTransitionDirection={
+              isSinglePageView && !isZoomedSinglePageFullscreen ? mobileTransition?.direction ?? null : null
+            }
             zoomScale={isSinglePageFullscreen ? pinchZoomScale : 1}
             onNavigatePrev={goToPrevSpread}
             onNavigateNext={goToNextSpread}
