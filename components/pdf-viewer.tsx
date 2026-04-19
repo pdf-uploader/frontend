@@ -56,11 +56,15 @@ export function PDFViewer({
   } | null>(null);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
+  const [pinchZoomScale, setPinchZoomScale] = useState(1);
   const [isCoarsePointer, setIsCoarsePointer] = useState(false);
   const [hasTouchInput, setHasTouchInput] = useState(false);
   const [isStandalonePwa, setIsStandalonePwa] = useState(false);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const flipTimerRef = useRef<number | null>(null);
+  const pinchStartDistanceRef = useRef<number | null>(null);
+  const pinchStartScaleRef = useRef(1);
+  const isPinchingRef = useRef(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const normalizedKeyword = highlightEnabled ? keyword.trim().toLowerCase() : "";
   const bookmarkedSet = useMemo(() => new Set(bookmarkedPages), [bookmarkedPages]);
@@ -84,6 +88,15 @@ export function PDFViewer({
       ? clampNumber(Math.floor((viewportWidth - 8) / 2), 320, 1800)
       : BOOK_PAGE_WIDTH;
   const pageHeight = isSinglePageFullscreen ? clampNumber(Math.floor(viewportHeight - 6), 240, 2600) : undefined;
+
+  useEffect(() => {
+    if (!isSinglePageFullscreen) {
+      setPinchZoomScale(1);
+      pinchStartDistanceRef.current = null;
+      pinchStartScaleRef.current = 1;
+      isPinchingRef.current = false;
+    }
+  }, [isSinglePageFullscreen]);
 
   useEffect(() => {
     if (!numPages) {
@@ -134,7 +147,7 @@ export function PDFViewer({
     }
 
     const preventPinchZoom = (event: TouchEvent) => {
-      if (event.touches.length > 1) {
+      if (!isSinglePageFullscreen && event.touches.length > 1) {
         event.preventDefault();
       }
     };
@@ -159,7 +172,7 @@ export function PDFViewer({
       currentViewport.removeEventListener("touchstart", preventPinchZoom);
       currentViewport.removeEventListener("touchend", preventDoubleTapZoom);
     };
-  }, [isSinglePageView]);
+  }, [isSinglePageFullscreen, isSinglePageView]);
 
   useEffect(() => {
     return () => {
@@ -261,6 +274,7 @@ export function PDFViewer({
         style={{
           WebkitUserSelect: "none",
           WebkitTouchCallout: "none",
+          touchAction: isSinglePageFullscreen ? "auto" : undefined,
           ...(!isFullscreen ? getCoverSurfaceStyle(coverTone) : {}),
         }}
         onWheel={(event) => {
@@ -282,10 +296,54 @@ export function PDFViewer({
           if (!isSinglePageView) {
             return;
           }
+          if (isSinglePageFullscreen && event.touches.length === 2) {
+            pinchStartDistanceRef.current = getTouchDistance(event.touches[0], event.touches[1]);
+            pinchStartScaleRef.current = pinchZoomScale;
+            isPinchingRef.current = true;
+            setTouchStartX(null);
+            return;
+          }
+          if (event.touches.length !== 1) {
+            return;
+          }
           setTouchStartX(event.touches[0]?.clientX ?? null);
         }}
+        onTouchMove={(event) => {
+          if (!isSinglePageFullscreen || !isPinchingRef.current || event.touches.length !== 2) {
+            return;
+          }
+
+          const startDistance = pinchStartDistanceRef.current;
+          if (!startDistance) {
+            return;
+          }
+
+          const currentDistance = getTouchDistance(event.touches[0], event.touches[1]);
+          const nextScale = clampNumber(pinchStartScaleRef.current * (currentDistance / startDistance), 1, 3);
+          setPinchZoomScale(nextScale);
+          event.preventDefault();
+        }}
         onTouchEnd={(event) => {
-          if (!isSinglePageView || touchStartX === null || flipDirection) {
+          if (!isSinglePageView || flipDirection) {
+            if (event.touches.length < 2) {
+              pinchStartDistanceRef.current = null;
+              pinchStartScaleRef.current = pinchZoomScale;
+              isPinchingRef.current = false;
+            }
+            return;
+          }
+
+          if (isSinglePageFullscreen && isPinchingRef.current) {
+            if (event.touches.length < 2) {
+              pinchStartDistanceRef.current = null;
+              pinchStartScaleRef.current = pinchZoomScale;
+              isPinchingRef.current = false;
+            }
+            setTouchStartX(null);
+            return;
+          }
+
+          if (touchStartX === null) {
             return;
           }
           const touchEndX = event.changedTouches[0]?.clientX;
@@ -293,13 +351,31 @@ export function PDFViewer({
             return;
           }
           const deltaX = touchStartX - touchEndX;
-          if (Math.abs(deltaX) < 44) {
-            return;
-          }
-          if (deltaX > 0) {
-            goToNextSpread();
+
+          if (isSinglePageFullscreen) {
+            if (Math.abs(deltaX) >= 30) {
+              if (deltaX > 0) {
+                goToNextSpread();
+              } else {
+                goToPrevSpread();
+              }
+            } else if (viewportRef.current) {
+              const viewportRect = viewportRef.current.getBoundingClientRect();
+              if (touchEndX < viewportRect.left + viewportRect.width / 2) {
+                goToPrevSpread();
+              } else {
+                goToNextSpread();
+              }
+            }
           } else {
-            goToPrevSpread();
+            if (Math.abs(deltaX) < 44) {
+              return;
+            }
+            if (deltaX > 0) {
+              goToNextSpread();
+            } else {
+              goToPrevSpread();
+            }
           }
           setTouchStartX(null);
         }}
@@ -323,6 +399,7 @@ export function PDFViewer({
             isFullscreen={isFullscreen}
             mobileIncomingPage={isSinglePageView ? mobileTransition?.to ?? null : null}
             mobileTransitionDirection={isSinglePageView ? mobileTransition?.direction ?? null : null}
+            zoomScale={isSinglePageFullscreen ? pinchZoomScale : 1}
             onNavigatePrev={goToPrevSpread}
             onNavigateNext={goToNextSpread}
           />
@@ -339,6 +416,7 @@ export function PDFViewer({
               pageHeight={pageHeight}
               isMobileView={isSinglePageView}
               isFullscreen={isFullscreen}
+              zoomScale={isSinglePageFullscreen ? pinchZoomScale : 1}
               onNavigatePrev={goToPrevSpread}
               onNavigateNext={goToNextSpread}
               isRightPage
@@ -485,6 +563,7 @@ interface BookPageProps {
   isRightPage?: boolean;
   mobileIncomingPage?: number | null;
   mobileTransitionDirection?: "next" | "prev" | null;
+  zoomScale: number;
   onNavigateNext: () => void;
   onNavigatePrev: () => void;
 }
@@ -504,6 +583,7 @@ function BookPage({
   isRightPage = false,
   mobileIncomingPage = null,
   mobileTransitionDirection = null,
+  zoomScale,
   onNavigateNext,
   onNavigatePrev,
 }: BookPageProps) {
@@ -521,7 +601,7 @@ function BookPage({
         pageNumber={pageToRender}
         width={pageHeight ? undefined : pageWidth}
         height={pageHeight}
-        scale={desktopFullscreenScale}
+        scale={desktopFullscreenScale * zoomScale}
         renderAnnotationLayer={false}
         renderTextLayer
         customTextRenderer={({ str }) => {
@@ -555,6 +635,9 @@ function BookPage({
       style={!isFullscreen ? { backgroundColor: pageSurface.pageBodyColor } : undefined}
       onClick={(event) => {
         if (isMobileView) {
+          if (isFullscreen) {
+            return;
+          }
           const rect = event.currentTarget.getBoundingClientRect();
           const x = event.clientX - rect.left;
           if (x < rect.width / 2) {
@@ -724,6 +807,15 @@ function toSpreadStart(page: number): number {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getTouchDistance(
+  first: { clientX: number; clientY: number },
+  second: { clientX: number; clientY: number }
+): number {
+  const deltaX = first.clientX - second.clientX;
+  const deltaY = first.clientY - second.clientY;
+  return Math.hypot(deltaX, deltaY);
 }
 
 function clampNumber(value: number, min: number, max: number): number {
