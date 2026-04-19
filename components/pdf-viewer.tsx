@@ -9,6 +9,8 @@ interface PDFViewerProps {
   fileUrl: string;
   activePage?: number;
   keyword?: string;
+  activeKeywordHitPage?: number;
+  activeKeywordHitOccurrenceInPage?: number;
   highlightEnabled?: boolean;
   bookmarkColor?: BookmarkColorId;
   pageTone?: PageToneId;
@@ -28,6 +30,8 @@ export function PDFViewer({
   fileUrl,
   activePage = 1,
   keyword = "",
+  activeKeywordHitPage,
+  activeKeywordHitOccurrenceInPage,
   highlightEnabled = true,
   bookmarkColor = "silver",
   pageTone = "white",
@@ -311,6 +315,8 @@ export function PDFViewer({
             bookmarkColor={bookmarkColor}
             pageTone={pageTone}
             normalizedKeyword={normalizedKeyword}
+            activeKeywordHitPage={activeKeywordHitPage}
+            activeKeywordHitOccurrenceInPage={activeKeywordHitOccurrenceInPage}
             pageWidth={pageWidth}
             pageHeight={pageHeight}
             isMobileView={isSinglePageView}
@@ -327,6 +333,8 @@ export function PDFViewer({
               bookmarkColor={bookmarkColor}
               pageTone={pageTone}
               normalizedKeyword={normalizedKeyword}
+              activeKeywordHitPage={activeKeywordHitPage}
+              activeKeywordHitOccurrenceInPage={activeKeywordHitOccurrenceInPage}
               pageWidth={pageWidth}
               pageHeight={pageHeight}
               isMobileView={isSinglePageView}
@@ -465,6 +473,8 @@ export function PDFViewer({
 interface BookPageProps {
   pageNumber: number;
   normalizedKeyword: string;
+  activeKeywordHitPage?: number;
+  activeKeywordHitOccurrenceInPage?: number;
   isBookmarked: boolean;
   bookmarkColor: BookmarkColorId;
   pageTone: PageToneId;
@@ -482,6 +492,8 @@ interface BookPageProps {
 function BookPage({
   pageNumber,
   normalizedKeyword,
+  activeKeywordHitPage,
+  activeKeywordHitOccurrenceInPage,
   isBookmarked,
   bookmarkColor,
   pageTone,
@@ -498,29 +510,40 @@ function BookPage({
   const desktopFullscreenScale = isFullscreen && !isMobileView ? 1.4 : 1;
   const pageSurface = getPageSurfaceStyle(pageTone);
 
-  const renderPdfPage = (pageToRender: number) => (
-    <Page
-      pageNumber={pageToRender}
-      width={pageHeight ? undefined : pageWidth}
-      height={pageHeight}
-      scale={desktopFullscreenScale}
-      renderAnnotationLayer={false}
-      renderTextLayer
-      customTextRenderer={({ str }) => {
-        if (!normalizedKeyword) {
-          return str;
-        }
+  const renderPdfPage = (pageToRender: number) => {
+    let pageKeywordOccurrenceCounter = 0;
+    const isActiveTargetPage = pageToRender === activeKeywordHitPage;
+    const activeOccurrence = isActiveTargetPage ? activeKeywordHitOccurrenceInPage : undefined;
+    const regex = normalizedKeyword ? new RegExp(`(${escapeRegExp(normalizedKeyword)})`, "gi") : null;
 
-        const lower = str.toLowerCase();
-        if (!lower.includes(normalizedKeyword)) {
-          return str;
-        }
+    return (
+      <Page
+        pageNumber={pageToRender}
+        width={pageHeight ? undefined : pageWidth}
+        height={pageHeight}
+        scale={desktopFullscreenScale}
+        renderAnnotationLayer={false}
+        renderTextLayer
+        customTextRenderer={({ str }) => {
+          if (!normalizedKeyword || !regex) {
+            return str;
+          }
 
-        const regex = new RegExp(`(${escapeRegExp(normalizedKeyword)})`, "gi");
-        return str.replace(regex, '<mark style="background:#fde68a;padding:0 2px;">$1</mark>');
-      }}
-    />
-  );
+          const lower = str.toLowerCase();
+          if (!lower.includes(normalizedKeyword)) {
+            return str;
+          }
+
+          return str.replace(regex, (_match) => {
+            pageKeywordOccurrenceCounter += 1;
+            const isActiveMatch = isActiveTargetPage && activeOccurrence === pageKeywordOccurrenceCounter;
+            const highlightColor = isActiveMatch ? "#bbf7d0" : "#fde68a";
+            return `<mark style="background:${highlightColor};padding:0 2px;">${_match}</mark>`;
+          });
+        }}
+      />
+    );
+  };
 
   return (
     <div

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useDebounce } from "use-debounce";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAdminUser } from "@/lib/auth-user";
@@ -22,9 +23,13 @@ const PAGE_CHUNK_SIZE = 5;
 
 export function FolderBrowser() {
   const queryClient = useQueryClient();
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const admin = isAdminUser(user);
-  const [globalSearch, setGlobalSearch] = useState("");
+  const urlKeyword = searchParams.get("keyword") ?? "";
+  const [globalSearch, setGlobalSearch] = useState(urlKeyword);
   const [newFolderName, setNewFolderName] = useState("");
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
@@ -73,6 +78,37 @@ export function FolderBrowser() {
   });
 
   const sortedFolders = useMemo(() => foldersQuery.data ?? [], [foldersQuery.data]);
+  const searchContextHref = useMemo(() => {
+    const params = new URLSearchParams();
+    const trimmed = globalSearch.trim();
+    if (trimmed) {
+      params.set("keyword", trimmed);
+    }
+    const queryString = params.toString();
+    return queryString ? `${pathname}?${queryString}` : pathname;
+  }, [globalSearch, pathname]);
+
+  useEffect(() => {
+    setGlobalSearch(urlKeyword);
+  }, [urlKeyword]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    const trimmed = debouncedGlobalSearch.trim();
+    if (trimmed) {
+      params.set("keyword", trimmed);
+    } else {
+      params.delete("keyword");
+    }
+
+    const currentQuery = searchParams.toString();
+    const nextQuery = params.toString();
+    if (currentQuery === nextQuery) {
+      return;
+    }
+
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+  }, [debouncedGlobalSearch, pathname, router, searchParams]);
 
   return (
     <section className="space-y-5">
@@ -129,7 +165,12 @@ export function FolderBrowser() {
         {globalSearchQuery.data && (
           <ul className="mt-3 space-y-2">
             {globalSearchQuery.data.map((item) => (
-              <GlobalSearchItem key={item.id} item={item} keyword={debouncedGlobalSearch} />
+              <GlobalSearchItem
+                key={item.id}
+                item={item}
+                keyword={debouncedGlobalSearch}
+                returnTo={encodeURIComponent(searchContextHref)}
+              />
             ))}
             {!globalSearchQuery.data.length && <li className="text-xs text-slate-500">No matching files.</li>}
           </ul>
@@ -213,7 +254,7 @@ function highlightKeyword(text: string, keyword: string): string {
   return text.replace(regex, '<mark style="background:#fde68a;padding:0 2px;">$1</mark>');
 }
 
-function GlobalSearchItem({ item, keyword }: { item: GlobalFindItem; keyword: string }) {
+function GlobalSearchItem({ item, keyword, returnTo }: { item: GlobalFindItem; keyword: string; returnTo: string }) {
   const [pageChunk, setPageChunk] = useState(0);
   const pageEntries = useMemo(
     () =>
@@ -245,7 +286,7 @@ function GlobalSearchItem({ item, keyword }: { item: GlobalFindItem; keyword: st
             {pagedEntries.map((entry) => (
               <li key={`${item.id}-${entry.page}`} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
                 <Link
-                  href={`/files/${item.id}?page=${entry.page}&keyword=${encodeURIComponent(keyword)}`}
+                  href={`/files/${item.id}?page=${entry.page}&keyword=${encodeURIComponent(keyword)}&returnTo=${returnTo}`}
                   className="font-medium text-blue-700 hover:underline"
                 >
                   Page {entry.page}

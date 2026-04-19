@@ -53,3 +53,12 @@ export interface AppUser {
   username?: string;
   createdAt?: string;
 }
+
+export interface BookmarkItem {
+  id: string;
+  fileId: string;
+  page: number;
+  color?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}

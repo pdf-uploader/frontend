@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import axios from "axios";
-import { api } from "@/lib/api";
+import { api, createBookmark, deleteBookmark, getBookmarks } from "@/lib/api";
 import { FileDetails } from "@/lib/types";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -42,12 +42,15 @@ const COVER_TONE_OPTIONS: Array<{ id: CoverToneId; label: string; swatch: string
 
 export default function FileViewerPage() {
   const params = useParams<{ fileId: string }>();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const fileId = params.fileId;
   const keyword = searchParams.get("keyword") ?? "";
   const page = Number(searchParams.get("page") ?? "1");
+  const returnToParam = searchParams.get("returnTo");
   const initialPage = Number.isFinite(page) && page > 0 ? page : 1;
   const [currentPage, setCurrentPage] = useState(initialPage);
+  const [activeKeywordHitIndex, setActiveKeywordHitIndex] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [bookmarkedPages, setBookmarkedPages] = useState<number[]>([]);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -79,6 +82,20 @@ export default function FileViewerPage() {
     enabled: Boolean(fileId),
   });
 
+  const bookmarksQuery = useQuery({
+    queryKey: ["bookmarks", fileId],
+    queryFn: async () => getBookmarks(fileId),
+    enabled: Boolean(fileId),
+  });
+
+  const createBookmarkMutation = useMutation({
+    mutationFn: createBookmark,
+  });
+
+  const deleteBookmarkMutation = useMutation({
+    mutationFn: deleteBookmark,
+  });
+
   useEffect(() => {
     if (!pdfBlobQuery.data) {
       setBlobUrl(null);
@@ -98,30 +115,15 @@ export default function FileViewerPage() {
   }, [initialPage]);
 
   useEffect(() => {
-    const bookmarkKey = getBookmarkStorageKey(fileId);
-    const rawBookmarks = window.localStorage.getItem(bookmarkKey);
-    if (!rawBookmarks) {
-      setBookmarkedPages([]);
+    if (!bookmarksQuery.data) {
       return;
     }
-    try {
-      const parsed = JSON.parse(rawBookmarks);
-      if (!Array.isArray(parsed)) {
-        setBookmarkedPages([]);
-        return;
-      }
-      const normalized = parsed
-        .filter((item): item is number => typeof item === "number" && Number.isFinite(item) && item > 0)
-        .sort((a, b) => a - b);
-      setBookmarkedPages(Array.from(new Set(normalized)));
-    } catch {
-      setBookmarkedPages([]);
-    }
-  }, [fileId]);
-
-  useEffect(() => {
-    window.localStorage.setItem(getBookmarkStorageKey(fileId), JSON.stringify(bookmarkedPages));
-  }, [bookmarkedPages, fileId]);
+    const normalized = bookmarksQuery.data
+      .map((item) => item.page)
+      .filter((item) => Number.isFinite(item) && item > 0)
+      .sort((a, b) => a - b);
+    setBookmarkedPages(Array.from(new Set(normalized)));
+  }, [bookmarksQuery.data]);
 
   useEffect(() => {
     const storedColor = window.localStorage.getItem(getBookmarkColorStorageKey(fileId));
@@ -238,6 +240,22 @@ export default function FileViewerPage() {
     () => fileQuery.data?.filename || `file-${fileId}.pdf`,
     [fileQuery.data?.filename, fileId]
   );
+  const returnToHref = useMemo(() => normalizeReturnToHref(returnToParam), [returnToParam]);
+  const keywordHits = useMemo(
+    () => collectKeywordHitsByPage(fileQuery.data?.content ?? [], keyword),
+    [fileQuery.data?.content, keyword]
+  );
+  const totalKeywordHits = keywordHits.length;
+  const currentKeywordHit = totalKeywordHits > 0 ? activeKeywordHitIndex + 1 : 0;
+  const activeKeywordTarget = totalKeywordHits > 0 ? keywordHits[activeKeywordHitIndex] ?? null : null;
+  useEffect(() => {
+    if (!keywordHits.length) {
+      setActiveKeywordHitIndex(0);
+      return;
+    }
+
+    setActiveKeywordHitIndex(findNearestKeywordHitIndex(keywordHits, currentPage));
+  }, [currentPage, keywordHits]);
 
   if (fileQuery.isLoading || pdfBlobQuery.isLoading) {
     return <p className="text-sm text-slate-600">Loading file...</p>;
@@ -284,8 +302,10 @@ export default function FileViewerPage() {
   const toggleBookmark = (page: number) => {
     setBookmarkedPages((prev) => {
       if (prev.includes(page)) {
+        deleteBookmarkMutation.mutate({ fileId, page });
         return prev.filter((item) => item !== page);
       }
+      createBookmarkMutation.mutate({ fileId, page, color: bookmarkColor });
       return [...prev, page].sort((a, b) => a - b);
     });
   };
@@ -367,6 +387,22 @@ export default function FileViewerPage() {
     lastTapTimeRef.current = now;
   };
 
+  const navigateKeywordHit = (direction: "previous" | "next") => {
+    if (!keywordHits.length) {
+      return;
+    }
+
+    setActiveKeywordHitIndex((previous) => {
+      const delta = direction === "previous" ? -1 : 1;
+      const nextIndex = (previous + delta + keywordHits.length) % keywordHits.length;
+      const nextHit = keywordHits[nextIndex];
+      if (nextHit) {
+        setCurrentPage(nextHit.page);
+      }
+      return nextIndex;
+    });
+  };
+
   return (
     <section
       ref={viewerSectionRef}
@@ -446,9 +482,20 @@ export default function FileViewerPage() {
         ) : (
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 space-y-1">
-              <Link href="/" className="inline-flex text-xs font-medium text-blue-700 hover:underline">
-                ← Back to library
-              </Link>
+              <div className="flex flex-wrap items-center gap-2">
+                <Link href="/" className="inline-flex text-xs font-medium text-blue-700 hover:underline">
+                  ← Back to library
+                </Link>
+                {returnToHref && (
+                  <button
+                    type="button"
+                    onClick={() => router.push(returnToHref)}
+                    className="inline-flex text-xs font-medium text-blue-700 hover:underline"
+                  >
+                    ← Back to search results
+                  </button>
+                )}
+              </div>
               <h1 className="truncate text-base font-semibold text-slate-900 sm:text-lg">{displayFilename}</h1>
             </div>
             <div className="flex items-center gap-2">
@@ -484,8 +531,40 @@ export default function FileViewerPage() {
                   Keyword highlight: <span className="font-semibold">{keyword}</span>
                 </p>
               )}
+              {keyword && (
+                <p className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs text-slate-700">
+                  Matches in this file: <span className="font-semibold">{totalKeywordHits}</span>
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2">
+              {keyword && (
+                <div className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white p-1">
+                  <button
+                    type="button"
+                    onClick={() => navigateKeywordHit("previous")}
+                    disabled={!totalKeywordHits}
+                    className="rounded-md px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Go to previous keyword match"
+                    title="Previous keyword match"
+                  >
+                    ← Prev hit
+                  </button>
+                  <p className="min-w-[72px] text-center text-xs font-medium text-slate-700">
+                    {totalKeywordHits ? `${currentKeywordHit} / ${totalKeywordHits}` : "0 / 0"}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => navigateKeywordHit("next")}
+                    disabled={!totalKeywordHits}
+                    className="rounded-md px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Go to next keyword match"
+                    title="Next keyword match"
+                  >
+                    Next hit →
+                  </button>
+                </div>
+              )}
               <div
                 className="relative"
                 onMouseEnter={() => setHoveredPanel("bookmark")}
@@ -640,6 +719,8 @@ export default function FileViewerPage() {
               fileUrl={blobUrl}
               activePage={currentPage}
               keyword={keyword}
+              activeKeywordHitPage={activeKeywordTarget?.page}
+              activeKeywordHitOccurrenceInPage={activeKeywordTarget?.occurrenceInPage}
               bookmarkColor={bookmarkColor}
               pageTone={pageTone}
               coverTone={coverTone}
@@ -676,10 +757,6 @@ function extractBackendError(error: unknown): string {
     return error.message;
   }
   return "Unknown error.";
-}
-
-function getBookmarkStorageKey(fileId: string): string {
-  return `bookmarks:${fileId}`;
 }
 
 function getBookmarkColorStorageKey(fileId: string): string {
@@ -757,5 +834,60 @@ function getBookmarkChipStyle(color: BookmarkColorId, isActive: boolean): {
     backgroundColor: "#ffffff",
     color: "#334155",
   };
+}
+
+function collectKeywordHitsByPage(content: string[], keyword: string): Array<{ page: number; occurrenceInPage: number }> {
+  const trimmedKeyword = keyword.trim().toLowerCase();
+  if (!trimmedKeyword || !content.length) {
+    return [];
+  }
+
+  const escaped = escapeRegExp(trimmedKeyword);
+  const regex = new RegExp(escaped, "gi");
+  const hits: Array<{ page: number; occurrenceInPage: number }> = [];
+
+  content.forEach((rawText, index) => {
+    const normalizedText = String(rawText ?? "").toLowerCase();
+    const pageNumber = index + 1;
+    const matchCount = (normalizedText.match(regex) ?? []).length;
+    for (let i = 0; i < matchCount; i += 1) {
+      hits.push({ page: pageNumber, occurrenceInPage: i + 1 });
+    }
+  });
+
+  return hits;
+}
+
+function findNearestKeywordHitIndex(hits: Array<{ page: number }>, page: number): number {
+  const samePageIndex = hits.findIndex((item) => item.page === page);
+  if (samePageIndex >= 0) {
+    return samePageIndex;
+  }
+
+  const nextPageIndex = hits.findIndex((item) => item.page > page);
+  if (nextPageIndex >= 0) {
+    return nextPageIndex;
+  }
+
+  return hits.length - 1;
+}
+
+function normalizeReturnToHref(rawHref: string | null): string | null {
+  if (!rawHref) {
+    return null;
+  }
+  try {
+    const decodedHref = decodeURIComponent(rawHref);
+    if (!decodedHref.startsWith("/") || decodedHref.startsWith("//")) {
+      return null;
+    }
+    return decodedHref;
+  } catch {
+    return null;
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useDebounce } from "use-debounce";
 import axios from "axios";
@@ -15,14 +15,24 @@ interface FileVersionItem {
   id: string;
   filename: string;
   createdAt: string;
+  content?: Array<{
+    page: number;
+    content: string;
+  }>;
 }
+
+const PAGE_CHUNK_SIZE = 5;
 
 export default function FolderPage() {
   const params = useParams<{ folderId: string }>();
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const folderId = params.folderId;
   const { user } = useAuth();
   const admin = isAdminUser(user);
-  const [folderSearch, setFolderSearch] = useState("");
+  const urlKeyword = searchParams.get("keyword") ?? "";
+  const [folderSearch, setFolderSearch] = useState(urlKeyword);
   const [dragging, setDragging] = useState(false);
   const [dragCounter, setDragCounter] = useState(0);
   const [orderedFiles, setOrderedFiles] = useState<FolderFile[]>([]);
@@ -79,19 +89,50 @@ export default function FolderPage() {
   const folderSearchQuery = useQuery({
     queryKey: ["folder-search", folderId, debouncedFolderSearch],
     queryFn: async () =>
-      (await api.get<FileVersionItem[]>(`/${folderId}/files/search`, { params: { filename: debouncedFolderSearch } }))
+      (await api.get<FileVersionItem[]>(`/folders/${folderId}/find`, { params: { keyword: debouncedFolderSearch } }))
         .data,
     enabled: debouncedFolderSearch.trim().length > 0,
   });
 
   const folder = folderQuery.data;
   const fileOrderSignature = folder?.files.map((file) => file.id).join("|") ?? "";
+  const searchContextHref = (() => {
+    const params = new URLSearchParams();
+    const trimmed = folderSearch.trim();
+    if (trimmed) {
+      params.set("keyword", trimmed);
+    }
+    const queryString = params.toString();
+    return queryString ? `${pathname}?${queryString}` : pathname;
+  })();
 
   useEffect(() => {
     if (folder) {
       setOrderedFiles(folder.files);
     }
   }, [fileOrderSignature, folder]);
+
+  useEffect(() => {
+    setFolderSearch(urlKeyword);
+  }, [urlKeyword]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    const trimmed = debouncedFolderSearch.trim();
+    if (trimmed) {
+      params.set("keyword", trimmed);
+    } else {
+      params.delete("keyword");
+    }
+
+    const currentQuery = searchParams.toString();
+    const nextQuery = params.toString();
+    if (currentQuery === nextQuery) {
+      return;
+    }
+
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+  }, [debouncedFolderSearch, pathname, router, searchParams]);
 
   if (folderQuery.isLoading) {
     return <p className="text-sm text-slate-600">Loading folder...</p>;
@@ -187,13 +228,14 @@ export default function FolderPage() {
           />
         </div>
         {folderSearchQuery.data && (
-          <ul className="mt-2 space-y-1 text-sm">
+          <ul className="mt-2 space-y-2 text-sm">
             {folderSearchQuery.data.map((item) => (
-              <li key={item.id}>
-                <Link href={`/files/${item.id}`} className="text-blue-700 hover:underline">
-                  {item.filename}
-                </Link>
-              </li>
+              <FolderSearchItem
+                key={item.id}
+                item={item}
+                keyword={debouncedFolderSearch}
+                returnTo={encodeURIComponent(searchContextHref)}
+              />
             ))}
             {!folderSearchQuery.data.length && <li className="text-xs text-slate-500">No matching files.</li>}
           </ul>
@@ -338,4 +380,96 @@ function moveFile(files: FolderFile[], fromIndex: number, toIndex: number): Fold
   }
   cloned.splice(toIndex, 0, picked);
   return cloned;
+}
+
+function FolderSearchItem({ item, keyword, returnTo }: { item: FileVersionItem; keyword: string; returnTo: string }) {
+  const [pageChunk, setPageChunk] = useState(0);
+  const pageEntries = Array.from(
+    new Map(
+      (item.content ?? []).map((entry) => [
+        Math.max(1, entry.page + 1),
+        {
+          page: Math.max(1, entry.page + 1),
+          snippet: extractSentencePreview(entry.content, keyword),
+        },
+      ])
+    ).values()
+  ).sort((a, b) => a.page - b.page);
+
+  const totalChunks = Math.max(1, Math.ceil(pageEntries.length / PAGE_CHUNK_SIZE));
+  const pageStart = pageChunk * PAGE_CHUNK_SIZE;
+  const pagedEntries = pageEntries.slice(pageStart, pageStart + PAGE_CHUNK_SIZE);
+
+  return (
+    <li className="rounded-md border border-slate-200 px-3 py-2 text-sm">
+      <Link href={`/files/${item.id}`} className="font-medium text-blue-700 hover:underline">
+        {item.filename}
+      </Link>
+      {pagedEntries.length > 0 && (
+        <div className="mt-2 space-y-2">
+          <ul className="space-y-1 text-xs">
+            {pagedEntries.map((entry) => (
+              <li key={`${item.id}-${entry.page}`} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+                <Link
+                  href={`/files/${item.id}?page=${entry.page}&keyword=${encodeURIComponent(keyword)}&returnTo=${returnTo}`}
+                  className="font-medium text-blue-700 hover:underline"
+                >
+                  Page {entry.page}
+                </Link>
+                <p
+                  className="mt-1 text-slate-700"
+                  dangerouslySetInnerHTML={{
+                    __html: highlightKeyword(entry.snippet, keyword),
+                  }}
+                />
+              </li>
+            ))}
+          </ul>
+          {pageEntries.length > PAGE_CHUNK_SIZE && (
+            <div className="flex items-center gap-2 text-xs">
+              <button
+                onClick={() => setPageChunk((prev) => Math.max(0, prev - 1))}
+                disabled={pageChunk === 0}
+                className="rounded border border-slate-300 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Prev
+              </button>
+              <span className="text-slate-500">
+                {pageChunk + 1} / {totalChunks}
+              </span>
+              <button
+                onClick={() => setPageChunk((prev) => Math.min(totalChunks - 1, prev + 1))}
+                disabled={pageChunk >= totalChunks - 1}
+                className="rounded border border-slate-300 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function highlightKeyword(text: string, keyword: string): string {
+  if (!keyword.trim()) {
+    return text;
+  }
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escaped})`, "gi");
+  return text.replace(regex, '<mark style="background:#fde68a;padding:0 2px;">$1</mark>');
+}
+
+function extractSentencePreview(content: string, keyword: string): string {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "...";
+  }
+  const sentences = normalized.split(/(?<=[.!?])\s+/);
+  const lowerKeyword = keyword.trim().toLowerCase();
+  const picked =
+    sentences.find((sentence) => lowerKeyword && sentence.toLowerCase().includes(lowerKeyword)) ?? sentences[0];
+  const clipped = picked.length > 180 ? `${picked.slice(0, 180)}...` : picked;
+  return `...${clipped}...`;
 }

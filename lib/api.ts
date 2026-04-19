@@ -1,9 +1,11 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { authUserFromAccessToken, normalizeAuthUser } from "@/lib/auth-user";
 import { authStore } from "@/lib/auth-store";
-import { SignInResponse } from "@/lib/types";
+import { BookmarkItem, SignInResponse } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_EXPRESS_SERVER_URL ?? "http://localhost:4000";
+const AUTH_SIGN_OUT_ENDPOINT = process.env.NEXT_PUBLIC_AUTH_SIGNOUT_ENDPOINT?.trim() ?? "";
+const AUTH_SIGN_OUT_METHOD = (process.env.NEXT_PUBLIC_AUTH_SIGNOUT_METHOD ?? "delete").toLowerCase();
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -17,7 +19,7 @@ function isAuthEndpoint(url?: string): boolean {
   if (!url) {
     return false;
   }
-  return AUTH_ENDPOINTS.some((endpoint) => url.includes(endpoint));
+  return AUTH_ENDPOINTS.some((endpoint) => url.includes(endpoint)) || Boolean(AUTH_SIGN_OUT_ENDPOINT && url.includes(AUTH_SIGN_OUT_ENDPOINT));
 }
 
 function attachAuthHeaders(config: InternalAxiosRequestConfig): InternalAxiosRequestConfig {
@@ -108,7 +110,19 @@ export async function signIn(email: string, password: string): Promise<SignInRes
 }
 
 export async function signOut(): Promise<void> {
-  await api.delete("/auth/signOut");
+  if (AUTH_SIGN_OUT_ENDPOINT) {
+    try {
+      if (AUTH_SIGN_OUT_METHOD === "post") {
+        await api.post(AUTH_SIGN_OUT_ENDPOINT);
+      } else if (AUTH_SIGN_OUT_METHOD === "patch") {
+        await api.patch(AUTH_SIGN_OUT_ENDPOINT);
+      } else {
+        await api.delete(AUTH_SIGN_OUT_ENDPOINT);
+      }
+    } catch {
+      // Logout should still complete client-side even if server revoke fails.
+    }
+  }
   authStore.clear();
 }
 
@@ -128,6 +142,22 @@ export async function refreshAccessToken(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+export async function getBookmarks(fileId: string): Promise<BookmarkItem[]> {
+  return (await api.get<BookmarkItem[]>("/bookmarks", { params: { fileId } })).data;
+}
+
+export async function createBookmark(payload: {
+  fileId: string;
+  page: number;
+  color?: string;
+}): Promise<BookmarkItem> {
+  return (await api.post<BookmarkItem>("/bookmarks", payload)).data;
+}
+
+export async function deleteBookmark(payload: { fileId: string; page: number }): Promise<void> {
+  await api.delete("/bookmarks", { data: payload });
 }
 
 function getCookie(name: string): string | null {
