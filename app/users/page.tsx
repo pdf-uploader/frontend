@@ -43,23 +43,28 @@ export default function UsersPage() {
   };
 
   return (
-    <section className="mx-auto max-w-xl space-y-4">
-      <h1 className="text-2xl font-semibold">Create User</h1>
-      <p className="text-sm text-slate-600">Only admins can create new users.</p>
+    <section className="ui-shell mx-auto max-w-2xl space-y-5">
+      <div>
+        <p className="mb-2 inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+          Admin
+        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">Create User</h1>
+        <p className="mt-1 text-sm text-slate-600">Only admins can create new users.</p>
+      </div>
 
-      <form onSubmit={onSubmit} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+      <form onSubmit={onSubmit} className="ui-card space-y-3 p-5">
         <input
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           placeholder="Email"
-          className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
+          className="ui-input"
           required
         />
         <input
           value={username}
           onChange={(event) => setUsername(event.target.value)}
           placeholder="Username"
-          className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
+          className="ui-input"
           required
         />
         <input
@@ -67,13 +72,13 @@ export default function UsersPage() {
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           placeholder="Password"
-          className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
+          className="ui-input"
           required
         />
 
         <button
           disabled={createUserMutation.isPending}
-          className="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white"
+          className="ui-btn-primary"
         >
           {createUserMutation.isPending ? "Creating..." : "Create User"}
         </button>

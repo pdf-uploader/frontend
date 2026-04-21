@@ -4,6 +4,12 @@
 
 :root {
   color-scheme: light;
+  --bg-primary: #f5f7fb;
+  --bg-secondary: #ffffff;
+  --surface-border: #e5e9f0;
+  --text-primary: #1f2937;
+  --text-secondary: #667085;
+  --brand-dark: #111827;
 }
 
 html {
@@ -25,11 +31,55 @@ body.hide-browser-scrollbar::-webkit-scrollbar {
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(125, 211, 252, 0.17), transparent 28%),
+    radial-gradient(circle at 90% 8%, rgba(167, 139, 250, 0.16), transparent 30%),
+    linear-gradient(180deg, #f8faff 0%, #f5f7fb 42%, #f7f8fc 100%);
+  @apply min-h-screen text-slate-900 antialiased;
+  color: var(--text-primary);
+  font-family:
+    Inter,
+    "SF Pro Text",
+    "SF Pro Display",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
 }
 
 a {
   @apply text-inherit no-underline;
+}
+
+@layer components {
+  .ui-shell {
+    @apply mx-auto w-full max-w-7xl px-4 py-7 sm:px-6 sm:py-8;
+  }
+
+  .ui-card {
+    @apply rounded-2xl border border-slate-200/90 bg-white/95 shadow-sm backdrop-blur;
+  }
+
+  .ui-card-soft {
+    @apply rounded-2xl border border-slate-200/80 bg-white/80 shadow-sm backdrop-blur;
+  }
+
+  .ui-input {
+    @apply w-full rounded-xl border border-slate-300/90 bg-white px-3.5 py-2.5 text-sm text-slate-800 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-200/60;
+  }
+
+  .ui-search-input {
+    @apply w-full rounded-full border border-slate-300/90 bg-white py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-200/60;
+  }
+
+  .ui-btn-primary {
+    @apply inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-btn-secondary {
+    @apply inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60;
+  }
 }
 
 @keyframes logoFloat {

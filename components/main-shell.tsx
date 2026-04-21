@@ -10,5 +10,5 @@ export function MainShell({ children }: { children: ReactNode }) {
     return <main className="min-h-screen w-full">{children}</main>;
   }
 
-  return <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>;
+  return <main className="ui-shell">{children}</main>;
 }

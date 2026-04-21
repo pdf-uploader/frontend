@@ -112,7 +112,7 @@ export function FolderBrowser() {
 
   return (
     <section className="space-y-5">
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="ui-card p-4 sm:p-5">
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
             <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
@@ -122,7 +122,7 @@ export function FolderBrowser() {
               id="globalSearch"
               value={globalSearch}
               onChange={(event) => setGlobalSearch(event.target.value)}
-              className="w-full rounded-full border border-slate-300 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+              className="ui-search-input"
               placeholder="Search files by keyword..."
             />
           </div>
@@ -130,11 +130,11 @@ export function FolderBrowser() {
             <button
               onClick={() => setShowCreateFolder((prev) => !prev)}
               title="Create folder"
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 bg-white text-lg text-slate-700 transition hover:border-blue-300 hover:text-blue-700"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 bg-white text-lg text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
             >
               <span className="relative inline-flex items-center justify-center">
                 <span>📁</span>
-                <span className="absolute -right-2 -top-2 inline-flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] text-white">
+                <span className="absolute -right-2 -top-2 inline-flex h-4 w-4 items-center justify-center rounded-full bg-slate-900 text-[10px] text-white">
                   +
                 </span>
               </span>
@@ -143,18 +143,18 @@ export function FolderBrowser() {
         </div>
 
         {admin && showCreateFolder && (
-          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
             <input
               id="newFolder"
               value={newFolderName}
               onChange={(event) => setNewFolderName(event.target.value)}
-              className="w-full max-w-sm rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              className="ui-input w-full max-w-sm"
               placeholder="Folder name"
             />
             <button
               onClick={() => createFolderMutation.mutate(newFolderName)}
               disabled={!newFolderName.trim() || createFolderMutation.isPending}
-              className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+              className="ui-btn-primary"
             >
               {createFolderMutation.isPending ? "Creating..." : "Create"}
             </button>
@@ -185,7 +185,7 @@ export function FolderBrowser() {
           <Link
             key={folder.id}
             href={`/folders/${folder.id}`}
-            className="block rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-300 hover:shadow"
+            className="block rounded-2xl border border-slate-200/90 bg-white/95 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
           >
             <div className="mb-2 flex items-start justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -212,12 +212,12 @@ export function FolderBrowser() {
             {admin && editingFolderId === folder.id && (
               <div
                 onClick={(event) => event.preventDefault()}
-                className="mt-3 space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2"
+                className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5"
               >
                 <input
                   value={folderNameDraft}
                   onChange={(event) => setFolderNameDraft(event.target.value)}
-                  className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                  className="ui-input"
                   placeholder="Rename folder"
                 />
                 <div className="flex flex-wrap gap-2">
@@ -225,13 +225,13 @@ export function FolderBrowser() {
                     onClick={() =>
                       renameFolderMutation.mutate({ folderId: folder.id, foldername: folderNameDraft })
                     }
-                    className="rounded bg-blue-600 px-2 py-1 text-xs text-white"
+                    className="ui-btn-primary px-3 py-1.5 text-xs"
                   >
                     Save
                   </button>
                   <button
                     onClick={() => deleteFolderMutation.mutate(folder.id)}
-                    className="rounded bg-red-600 px-2 py-1 text-xs text-white"
+                    className="inline-flex items-center justify-center rounded-full bg-rose-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-rose-500"
                   >
                     Delete
                   </button>
@@ -276,18 +276,18 @@ function GlobalSearchItem({ item, keyword, returnTo }: { item: GlobalFindItem; k
   const pagedEntries = pageEntries.slice(pageStart, pageStart + PAGE_CHUNK_SIZE);
 
   return (
-    <li className="rounded-md border border-slate-200 px-3 py-2 text-sm">
-      <Link href={`/files/${item.id}`} className="font-medium text-blue-700 hover:underline">
+    <li className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+      <Link href={`/files/${item.id}`} className="font-medium text-slate-800 hover:underline">
         {item.filename}
       </Link>
       {pagedEntries.length > 0 && (
         <div className="mt-2 space-y-2">
           <ul className="space-y-1 text-xs">
             {pagedEntries.map((entry) => (
-              <li key={`${item.id}-${entry.page}`} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+              <li key={`${item.id}-${entry.page}`} className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
                 <Link
                   href={`/files/${item.id}?page=${entry.page}&keyword=${encodeURIComponent(keyword)}&returnTo=${returnTo}`}
-                  className="font-medium text-blue-700 hover:underline"
+                  className="font-medium text-slate-700 hover:underline"
                 >
                   Page {entry.page}
                 </Link>

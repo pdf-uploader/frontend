@@ -23,28 +23,29 @@ export function Navbar() {
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
+    <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/85 backdrop-blur-xl">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-5">
-          <Link href="/" className="text-sm font-semibold text-blue-600">
+          <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400" />
             PDF Manager
           </Link>
-          <nav className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
-            <Link href="/" className="hover:text-slate-900">
+          <nav className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600">
+            <Link href="/" className="rounded-full px-3 py-1.5 hover:bg-slate-100 hover:text-slate-900">
               Library
             </Link>
             {isAdminUser(user) && (
-              <Link href="/users" className="font-medium text-blue-700 hover:text-blue-900">
+              <Link href="/users" className="rounded-full px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-100 hover:text-slate-900">
                 Users
               </Link>
             )}
           </nav>
         </div>
         <div className="flex items-center gap-3">
-          <p className="hidden text-xs text-slate-500 sm:block">{user?.email}</p>
+          <p className="hidden rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500 sm:block">{user?.email}</p>
           <button
             onClick={() => logoutMutation.mutate()}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700"
+            className="ui-btn-primary text-xs"
             disabled={logoutMutation.isPending}
           >
             {logoutMutation.isPending ? "Logging out..." : "Logout"}

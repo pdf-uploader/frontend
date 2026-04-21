@@ -177,7 +177,7 @@ export default function FolderPage() {
 
   return (
     <section
-      className={`space-y-4 ${dragging ? "rounded-xl ring-2 ring-blue-300 ring-offset-2" : ""}`}
+      className={`ui-shell space-y-5 ${dragging ? "rounded-2xl ring-2 ring-slate-300 ring-offset-2" : ""}`}
       onDragOver={(event) => {
         if (!admin) return;
         event.preventDefault();
@@ -205,25 +205,25 @@ export default function FolderPage() {
       }}
     >
       {admin && dragging && (
-        <div className="sticky top-16 z-10 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+        <div className="sticky top-20 z-10 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm">
           Drop files anywhere on this page to upload to this folder.
         </div>
       )}
 
       <div className="space-y-2">
-        <Link href="/" className="inline-flex text-xs font-medium text-blue-700 hover:underline">
+        <Link href="/" className="inline-flex text-xs font-medium text-slate-700 hover:underline">
           ← Back to library
         </Link>
-        <h1 className="text-2xl font-semibold">📁 {folder.foldername}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">📁 {folder.foldername}</h1>
       </div>
 
-      <div className="rounded-md border border-slate-200 bg-white p-3">
+      <div className="ui-card p-4">
         <div className="relative">
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">🔍</span>
           <input
             value={folderSearch}
             onChange={(event) => setFolderSearch(event.target.value)}
-            className="w-full rounded-full border border-slate-300 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+            className="ui-search-input"
             placeholder="Search filename in this folder..."
           />
         </div>
@@ -242,14 +242,14 @@ export default function FolderPage() {
         )}
       </div>
 
-      <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 text-sm">
+      <div className="ui-card-soft border-dashed p-4 text-sm">
         {admin ? (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
               <p>Drop PDF files anywhere on this page or use + to upload multiple files</p>
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="rounded bg-slate-900 px-2 py-1 text-white"
+                className="ui-btn-primary h-8 w-8 p-0 text-base"
                 title="Upload files"
               >
                 +
@@ -264,12 +264,12 @@ export default function FolderPage() {
               />
             </div>
             {orderedFiles.length > 1 && (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
                 <p>Drag and drop files in the list to reorder them, then save.</p>
                 <button
                   onClick={() => saveOrderMutation.mutate(orderedFiles.map((file) => file.id))}
                   disabled={!hasOrderChanges || saveOrderMutation.isPending}
-                  className="rounded bg-blue-700 px-3 py-1.5 font-medium text-white disabled:cursor-not-allowed disabled:bg-blue-300"
+                  className="ui-btn-primary px-3 py-1.5 text-xs"
                 >
                   {saveOrderMutation.isPending ? "Saving order..." : "Save order"}
                 </button>
@@ -289,12 +289,12 @@ export default function FolderPage() {
         )}
       </div>
 
-      <ul className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+      <ul className="ui-card space-y-2 p-3">
         {orderedFiles.map((file, index) => (
           <li
             key={file.id}
             className={`flex items-center justify-between rounded border px-3 py-2 text-sm transition ${
-              dragOverFileId === file.id ? "border-blue-400 bg-blue-50" : "border-slate-200"
+              dragOverFileId === file.id ? "border-slate-400 bg-slate-100" : "border-slate-200"
             }`}
             draggable={admin}
             onDragStart={() => {
@@ -333,7 +333,7 @@ export default function FolderPage() {
           >
             <div className="flex min-w-0 items-center gap-2">
               {admin && <span className="text-slate-400">⋮⋮</span>}
-              <Link href={`/files/${file.id}`} className="truncate text-blue-700 hover:underline">
+              <Link href={`/files/${file.id}`} className="truncate text-slate-700 hover:underline">
                 📄 {file.filename}
               </Link>
             </div>
@@ -357,7 +357,7 @@ export default function FolderPage() {
                 </button>
                 <button
                   onClick={() => deleteFileMutation.mutate(file.id)}
-                  className="rounded px-1 text-red-600 hover:bg-red-50"
+                  className="rounded px-1 text-rose-600 hover:bg-rose-50"
                   title="Delete file"
                 >
                   🗑
@@ -401,18 +401,18 @@ function FolderSearchItem({ item, keyword, returnTo }: { item: FileVersionItem; 
   const pagedEntries = pageEntries.slice(pageStart, pageStart + PAGE_CHUNK_SIZE);
 
   return (
-    <li className="rounded-md border border-slate-200 px-3 py-2 text-sm">
-      <Link href={`/files/${item.id}`} className="font-medium text-blue-700 hover:underline">
+    <li className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+      <Link href={`/files/${item.id}`} className="font-medium text-slate-800 hover:underline">
         {item.filename}
       </Link>
       {pagedEntries.length > 0 && (
         <div className="mt-2 space-y-2">
           <ul className="space-y-1 text-xs">
             {pagedEntries.map((entry) => (
-              <li key={`${item.id}-${entry.page}`} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+              <li key={`${item.id}-${entry.page}`} className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
                 <Link
                   href={`/files/${item.id}?page=${entry.page}&keyword=${encodeURIComponent(keyword)}&returnTo=${returnTo}`}
-                  className="font-medium text-blue-700 hover:underline"
+                  className="font-medium text-slate-700 hover:underline"
                 >
                   Page {entry.page}
                 </Link>
