@@ -299,7 +299,14 @@ export function PDFViewer({
         setNumPages(pages);
         onNumPagesChange?.(pages);
       }}
-      loading={<p className="text-sm text-slate-600">Loading PDF...</p>}
+      loading={
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <p className="mb-2 text-xs font-medium text-slate-600">Loading PDF pages...</p>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+            <div className="h-full w-1/3 rounded-full bg-blue-600 animate-pulse" />
+          </div>
+        </div>
+      }
       className={isFullscreen ? "flex h-full w-full flex-col" : "space-y-4"}
     >
       <div

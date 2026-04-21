@@ -258,7 +258,14 @@ export default function FileViewerPage() {
   }, [currentPage, keywordHits]);
 
   if (fileQuery.isLoading || pdfBlobQuery.isLoading) {
-    return <p className="text-sm text-slate-600">Loading file...</p>;
+    return (
+      <section className="mx-auto w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="mb-3 text-sm font-medium text-slate-700">Loading file...</p>
+        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+          <div className="h-full w-1/3 rounded-full bg-blue-600 animate-pulse" />
+        </div>
+      </section>
+    );
   }
 
   if (fileQuery.error || pdfBlobQuery.error || !fileQuery.data || !pdfBlobQuery.data) {

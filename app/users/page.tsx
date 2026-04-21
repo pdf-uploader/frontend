@@ -75,6 +75,9 @@ export default function UsersPage() {
           className="ui-input"
           required
         />
+        <p className="text-xs text-slate-600">
+          Password must be at least 8 characters and include 1 special character and 1 uppercase letter.
+        </p>
 
         <button
           disabled={createUserMutation.isPending}
