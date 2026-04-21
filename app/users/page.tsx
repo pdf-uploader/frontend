@@ -37,7 +37,7 @@ export default function UsersPage() {
     },
   });
   const deleteUserMutation = useMutation({
-    mutationFn: async (userId: string) => api.delete("/users", { data: { userId } }),
+    mutationFn: async (userId: string) => api.delete(`/users/${userId}`),
     onSuccess: () => {
       void usersQuery.refetch();
     },
@@ -154,15 +154,15 @@ export default function UsersPage() {
                       <button
                         type="button"
                         onClick={() => deleteUserMutation.mutate(listedUser.id)}
-                        disabled={deleteUserMutation.isPending}
-                        aria-label={`Delete ${listedUser.email ?? "user"}`}
-                        className="inline-flex items-center justify-center rounded-md p-1.5 text-rose-600 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-label={`Delete user ${listedUser.email ?? listedUser.username ?? listedUser.id}`}
                         title="Delete user"
+                        disabled={deleteUserMutation.isPending}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                           <path d="M3 6h18" />
                           <path d="M8 6V4h8v2" />
-                          <path d="M6 6l1 14h10l1-14" />
+                          <path d="M19 6l-1 14H6L5 6" />
                           <path d="M10 11v6" />
                           <path d="M14 11v6" />
                         </svg>
