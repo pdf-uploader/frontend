@@ -305,7 +305,8 @@ export function PDFViewer({
       <div
         ref={viewportRef}
         className={[
-          "relative border touch-pan-y",
+          "relative border",
+          isZoomedDocument ? "touch-auto" : "touch-pan-y",
           isZoomedDocument ? "overflow-auto" : "overflow-hidden",
           isFullscreen
             ? "h-full w-full rounded-none border-0 bg-slate-950 p-0"
@@ -334,6 +335,10 @@ export function PDFViewer({
         }}
         onTouchStart={(event) => {
           if (!isSinglePageView) {
+            return;
+          }
+          if (isZoomedDocument) {
+            setTouchStartX(null);
             return;
           }
           if (isSinglePageFullscreen && event.touches.length === 2) {
@@ -369,6 +374,15 @@ export function PDFViewer({
         }}
         onTouchEnd={(event) => {
           if (!isSinglePageView || flipDirection) {
+            if (event.touches.length < 2) {
+              pinchStartDistanceRef.current = null;
+              pinchStartScaleRef.current = pinchZoomScale;
+              isPinchingRef.current = false;
+            }
+            return;
+          }
+          if (isZoomedDocument) {
+            setTouchStartX(null);
             if (event.touches.length < 2) {
               pinchStartDistanceRef.current = null;
               pinchStartScaleRef.current = pinchZoomScale;
