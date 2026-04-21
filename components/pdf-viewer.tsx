@@ -72,12 +72,11 @@ export function PDFViewer({
   const normalizedKeyword = highlightEnabled ? keyword.trim().toLowerCase() : "";
   const bookmarkedSet = useMemo(() => new Set(bookmarkedPages), [bookmarkedPages]);
   const FLIP_DURATION = 460;
-  const isTouchLikeDevice = isCoarsePointer || hasTouchInput;
   const isSinglePageView =
-    viewportWidth === 0 ||
-    viewportWidth < MOBILE_BREAKPOINT ||
-    isStandalonePwa ||
-    isTouchLikeDevice;
+    viewportWidth > 0 &&
+    (viewportWidth < MOBILE_BREAKPOINT ||
+      isStandalonePwa ||
+      ((isCoarsePointer || hasTouchInput) && viewportWidth < TOUCH_DESKTOP_BREAKPOINT));
   const effectiveDesktopLeftPage = toSpreadStart(currentPage);
   const leftPage = isSinglePageView ? currentPage : effectiveDesktopLeftPage;
   const rightPage = !isSinglePageView && effectiveDesktopLeftPage + 1 <= numPages ? effectiveDesktopLeftPage + 1 : null;
@@ -489,13 +488,7 @@ export function PDFViewer({
             +
           </button>
         </div>
-        <div
-          className={[
-            "grid grid-cols-1 gap-3",
-            !isSinglePageView ? "lg:grid-cols-2" : "",
-            isFullscreen ? "h-full w-full gap-0" : "",
-          ].join(" ")}
-        >
+        <div className={["grid grid-cols-1 gap-3 lg:grid-cols-2", isFullscreen ? "h-full w-full gap-0" : ""].join(" ")}>
           <BookPage
             pageNumber={leftPage}
             isBookmarked={bookmarkedSet.has(leftPage)}
@@ -516,7 +509,7 @@ export function PDFViewer({
             onNavigatePrev={goToPrevSpread}
             onNavigateNext={goToNextSpread}
           />
-          {!isSinglePageView && rightPage ? (
+          {rightPage ? (
             <BookPage
               pageNumber={rightPage}
               isBookmarked={bookmarkedSet.has(rightPage)}
@@ -534,9 +527,9 @@ export function PDFViewer({
               onNavigateNext={goToNextSpread}
               isRightPage
             />
-          ) : !isSinglePageView ? (
+          ) : (
             <div className={["hidden lg:block", isFullscreen ? "bg-white" : "rounded-xl border border-dashed border-slate-300 bg-white/70"].join(" ")} />
-          ) : null}
+          )}
         </div>
 
         {flipDirection && (
