@@ -284,19 +284,22 @@ function GlobalSearchItem({ item, keyword, returnTo }: { item: GlobalFindItem; k
         <div className="mt-2 space-y-2">
           <ul className="space-y-1 text-xs">
             {pagedEntries.map((entry) => (
-              <li key={`${item.id}-${entry.page}`} className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
+              <li key={`${item.id}-${entry.page}`}>
                 <Link
                   href={`/files/${item.id}?page=${entry.page}&keyword=${encodeURIComponent(keyword)}&returnTo=${returnTo}`}
-                  className="font-medium text-slate-700 hover:underline"
+                  className="block rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm"
                 >
-                  Page {entry.page}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-slate-700">Page {entry.page}</span>
+                    <span className="text-[11px] text-slate-500">Open</span>
+                  </div>
+                  <p
+                    className="mt-1 text-slate-700"
+                    dangerouslySetInnerHTML={{
+                      __html: highlightKeyword(entry.snippet, keyword),
+                    }}
+                  />
                 </Link>
-                <p
-                  className="mt-1 text-slate-700"
-                  dangerouslySetInnerHTML={{
-                    __html: highlightKeyword(entry.snippet, keyword),
-                  }}
-                />
               </li>
             ))}
           </ul>
