@@ -8,13 +8,13 @@ import { MainShell } from "@/components/main-shell";
 import { PWARegister } from "@/components/pwa-register";
 
 export const metadata: Metadata = {
-  title: "PDF Management",
-  description: "PDF management and search frontend",
+  title: "File Management",
+  description: "File management and search frontend",
   manifest: "/mainfest.json",
-  applicationName: "Interactive PDF Manager",
+  applicationName: "Interactive File Manager",
   appleWebApp: {
     capable: true,
-    title: "PDF Manager",
+    title: "File Manager",
     statusBarStyle: "black-translucent",
   },
   icons: {
