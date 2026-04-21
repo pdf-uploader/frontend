@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
+import axios from "axios";
 import { isAdminUser } from "@/lib/auth-user";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/use-auth";
@@ -42,6 +43,7 @@ export default function UsersPage() {
     event.preventDefault();
     createUserMutation.mutate();
   };
+  const createUserErrorMessage = getBackendErrorMessage(createUserMutation.error);
 
   return (
     <section className="ui-shell mx-auto max-w-2xl space-y-5">
@@ -111,7 +113,33 @@ export default function UsersPage() {
       </form>
 
       {createUserMutation.isSuccess && <p className="text-sm text-green-700">User created successfully.</p>}
-      {createUserMutation.error && <p className="text-sm text-red-600">Failed to create user.</p>}
+      {createUserMutation.error && <p className="text-sm text-red-600">{createUserErrorMessage}</p>}
     </section>
   );
+}
+
+function getBackendErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as { message?: string; error?: string } | string | undefined;
+    if (typeof data === "string" && data.trim()) {
+      return data;
+    }
+    if (data && typeof data === "object") {
+      if (typeof data.message === "string" && data.message.trim()) {
+        return data.message;
+      }
+      if (typeof data.error === "string" && data.error.trim()) {
+        return data.error;
+      }
+    }
+    if (typeof error.message === "string" && error.message.trim()) {
+      return error.message;
+    }
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return "Failed to create user.";
 }
