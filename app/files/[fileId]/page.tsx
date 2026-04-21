@@ -273,7 +273,7 @@ export default function FileViewerPage() {
           {backendError || "The backend did not return a readable error message. Please try again."}
         </p>
         <div className="mt-5 flex items-center gap-3">
-          <Link href="/" className="ui-btn-primary text-xs">
+          <Link href="/" className="ui-btn-back">
             Back to library
           </Link>
           <button
@@ -483,14 +483,14 @@ export default function FileViewerPage() {
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 space-y-1">
               <div className="flex flex-wrap items-center gap-2">
-                <Link href="/" className="ui-btn-secondary px-3 py-1.5 text-xs">
+                <Link href="/" className="ui-btn-back px-3 py-1.5">
                   Back to library
                 </Link>
                 {returnToHref && (
                   <button
                     type="button"
                     onClick={() => router.push(returnToHref)}
-                    className="ui-btn-secondary px-3 py-1.5 text-xs"
+                    className="ui-btn-back px-3 py-1.5"
                   >
                     Back to search results
                   </button>

@@ -290,11 +290,11 @@ function GlobalSearchItem({ item, keyword, returnTo }: { item: GlobalFindItem; k
                   className="block rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-slate-700">Page {entry.page}</span>
+                    <span className="text-sm font-bold text-slate-800 sm:text-base">Page {entry.page}</span>
                     <span className="text-[11px] text-slate-500">Open</span>
                   </div>
                   <p
-                    className="mt-1 text-slate-700"
+                    className="mt-1 text-[13px] text-slate-700 sm:text-sm"
                     dangerouslySetInnerHTML={{
                       __html: highlightKeyword(entry.snippet, keyword),
                     }}

@@ -46,6 +46,9 @@ export function PDFViewer({
   const TOUCH_DESKTOP_BREAKPOINT = 1280;
   const BOOK_PAGE_WIDTH = 520;
   const MOBILE_PAGE_MAX_WIDTH = 700;
+  const MIN_ZOOM = 1;
+  const MAX_ZOOM = 3;
+  const ZOOM_STEP = 0.2;
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(activePage);
   const [flipDirection, setFlipDirection] = useState<"next" | "prev" | null>(null);
@@ -78,8 +81,8 @@ export function PDFViewer({
   const leftPage = isSinglePageView ? currentPage : effectiveDesktopLeftPage;
   const rightPage = !isSinglePageView && effectiveDesktopLeftPage + 1 <= numPages ? effectiveDesktopLeftPage + 1 : null;
   const isSinglePageFullscreen = isFullscreen && isSinglePageView;
-  const isZoomedSinglePageFullscreen = isSinglePageFullscreen && pinchZoomScale > 1;
-  const shouldFitToFullscreenHeight = isSinglePageFullscreen && pinchZoomScale <= 1;
+  const isZoomedDocument = pinchZoomScale > MIN_ZOOM;
+  const shouldFitToFullscreenHeight = isSinglePageFullscreen && pinchZoomScale <= MIN_ZOOM;
   const pageWidth = isSinglePageView
     ? clampNumber(
         Math.floor(viewportWidth - (isFullscreen ? 8 : 56)),
@@ -93,12 +96,16 @@ export function PDFViewer({
 
   useEffect(() => {
     if (!isSinglePageFullscreen) {
-      setPinchZoomScale(1);
+      setPinchZoomScale(MIN_ZOOM);
       pinchStartDistanceRef.current = null;
-      pinchStartScaleRef.current = 1;
+      pinchStartScaleRef.current = MIN_ZOOM;
       isPinchingRef.current = false;
     }
-  }, [isSinglePageFullscreen]);
+  }, [MIN_ZOOM, isSinglePageFullscreen]);
+
+  useEffect(() => {
+    setPinchZoomScale(MIN_ZOOM);
+  }, [MIN_ZOOM, fileUrl]);
 
   useEffect(() => {
     if (!isSinglePageFullscreen || !viewportRef.current) {
@@ -193,6 +200,21 @@ export function PDFViewer({
 
   const canFlipNext = isSinglePageView ? currentPage < numPages : effectiveDesktopLeftPage + 2 <= numPages;
   const canFlipPrev = isSinglePageView ? currentPage > 1 : effectiveDesktopLeftPage > 1;
+  const canZoomOut = pinchZoomScale > MIN_ZOOM;
+  const canZoomIn = pinchZoomScale < MAX_ZOOM;
+  const zoomPercent = Math.round(pinchZoomScale * 100);
+
+  const zoomOut = () => {
+    setPinchZoomScale((prev) => clampNumber(Number((prev - ZOOM_STEP).toFixed(2)), MIN_ZOOM, MAX_ZOOM));
+  };
+
+  const zoomIn = () => {
+    setPinchZoomScale((prev) => clampNumber(Number((prev + ZOOM_STEP).toFixed(2)), MIN_ZOOM, MAX_ZOOM));
+  };
+
+  const resetZoom = () => {
+    setPinchZoomScale(MIN_ZOOM);
+  };
 
   const goToNextSpread = () => {
     if (!canFlipNext || flipDirection) {
@@ -201,7 +223,7 @@ export function PDFViewer({
     setFlipDirection("next");
     if (isSinglePageView) {
       const targetPage = Math.min(numPages, currentPage + 1);
-      if (isZoomedSinglePageFullscreen) {
+      if (isZoomedDocument) {
         setMobileTransition(null);
       } else {
         setMobileTransition({ from: currentPage, to: targetPage, direction: "next" });
@@ -226,7 +248,7 @@ export function PDFViewer({
     setFlipDirection("prev");
     if (isSinglePageView) {
       const targetPage = Math.max(1, currentPage - 1);
-      if (isZoomedSinglePageFullscreen) {
+      if (isZoomedDocument) {
         setMobileTransition(null);
       } else {
         setMobileTransition({ from: currentPage, to: targetPage, direction: "prev" });
@@ -284,7 +306,7 @@ export function PDFViewer({
         ref={viewportRef}
         className={[
           "relative border touch-pan-y",
-          isZoomedSinglePageFullscreen ? "overflow-auto" : "overflow-hidden",
+          isZoomedDocument ? "overflow-auto" : "overflow-hidden",
           isFullscreen
             ? "h-full w-full rounded-none border-0 bg-slate-950 p-0"
             : "mx-auto h-auto max-w-[1120px] rounded-2xl border-slate-200 p-3 shadow-inner lg:h-[760px] lg:p-4",
@@ -337,7 +359,11 @@ export function PDFViewer({
           }
 
           const currentDistance = getTouchDistance(event.touches[0], event.touches[1]);
-          const nextScale = clampNumber(pinchStartScaleRef.current * (currentDistance / startDistance), 1, 3);
+          const nextScale = clampNumber(
+            pinchStartScaleRef.current * (currentDistance / startDistance),
+            MIN_ZOOM,
+            MAX_ZOOM
+          );
           setPinchZoomScale(nextScale);
           event.preventDefault();
         }}
@@ -402,6 +428,52 @@ export function PDFViewer({
         {!isSinglePageView && (
           <div className="pointer-events-none absolute inset-y-0 left-1/2 w-10 -translate-x-1/2 bg-gradient-to-r from-slate-300/25 via-slate-400/30 to-slate-300/25 blur-lg" />
         )}
+        <div
+          className={[
+            "absolute right-3 top-3 z-30 flex items-center gap-1.5 rounded-full border px-1.5 py-1 shadow-sm backdrop-blur",
+            isFullscreen ? "border-slate-600 bg-slate-900/85 text-white" : "border-slate-300 bg-white/95 text-slate-800",
+          ].join(" ")}
+        >
+          <span className="px-1 text-[11px] font-semibold">🔎</span>
+          <button
+            type="button"
+            onClick={zoomOut}
+            disabled={!canZoomOut}
+            className={[
+              "h-7 w-7 rounded-full text-sm font-semibold transition",
+              isFullscreen ? "hover:bg-slate-700 disabled:text-slate-500" : "hover:bg-slate-100 disabled:text-slate-300",
+            ].join(" ")}
+            title="Zoom out"
+            aria-label="Zoom out"
+          >
+            -
+          </button>
+          <button
+            type="button"
+            onClick={resetZoom}
+            className={[
+              "rounded-full px-2.5 py-1 text-[11px] font-semibold transition",
+              isFullscreen ? "hover:bg-slate-700" : "hover:bg-slate-100",
+            ].join(" ")}
+            title="Reset zoom"
+            aria-label="Reset zoom"
+          >
+            {zoomPercent}%
+          </button>
+          <button
+            type="button"
+            onClick={zoomIn}
+            disabled={!canZoomIn}
+            className={[
+              "h-7 w-7 rounded-full text-sm font-semibold transition",
+              isFullscreen ? "hover:bg-slate-700 disabled:text-slate-500" : "hover:bg-slate-100 disabled:text-slate-300",
+            ].join(" ")}
+            title="Zoom in"
+            aria-label="Zoom in"
+          >
+            +
+          </button>
+        </div>
         <div className={["grid grid-cols-1 gap-3 lg:grid-cols-2", isFullscreen ? "h-full w-full gap-0" : ""].join(" ")}>
           <BookPage
             pageNumber={leftPage}
@@ -415,11 +487,11 @@ export function PDFViewer({
             pageHeight={pageHeight}
             isMobileView={isSinglePageView}
             isFullscreen={isFullscreen}
-            mobileIncomingPage={isSinglePageView && !isZoomedSinglePageFullscreen ? mobileTransition?.to ?? null : null}
+            mobileIncomingPage={isSinglePageView && !isZoomedDocument ? mobileTransition?.to ?? null : null}
             mobileTransitionDirection={
-              isSinglePageView && !isZoomedSinglePageFullscreen ? mobileTransition?.direction ?? null : null
+              isSinglePageView && !isZoomedDocument ? mobileTransition?.direction ?? null : null
             }
-            zoomScale={isSinglePageFullscreen ? pinchZoomScale : 1}
+            zoomScale={pinchZoomScale}
             onNavigatePrev={goToPrevSpread}
             onNavigateNext={goToNextSpread}
           />
@@ -436,7 +508,7 @@ export function PDFViewer({
               pageHeight={pageHeight}
               isMobileView={isSinglePageView}
               isFullscreen={isFullscreen}
-              zoomScale={isSinglePageFullscreen ? pinchZoomScale : 1}
+              zoomScale={pinchZoomScale}
               onNavigatePrev={goToPrevSpread}
               onNavigateNext={goToNextSpread}
               isRightPage
@@ -475,6 +547,7 @@ export function PDFViewer({
             {isSinglePageView
               ? "Tap left/right side, swipe, or use buttons to navigate pages"
               : "Scroll or click left/right page edges to flip"}
+            {" • "}Use zoom controls for detailed reading
           </p>
           <button
             type="button"
@@ -650,10 +723,13 @@ function BookPage({
       className={[
         "group relative flex flex-col overflow-hidden rounded-xl border border-slate-200 p-2 shadow-sm transition hover:shadow-md",
         isFullscreen ? "h-full rounded-none border-0 p-0 shadow-none" : "",
-        isMobileView ? "cursor-default" : isRightPage ? "cursor-e-resize" : "cursor-w-resize",
+        zoomScale > 1 ? "cursor-grab" : isMobileView ? "cursor-default" : isRightPage ? "cursor-e-resize" : "cursor-w-resize",
       ].join(" ")}
       style={!isFullscreen ? { backgroundColor: pageSurface.pageBodyColor } : undefined}
       onClick={(event) => {
+        if (zoomScale > 1) {
+          return;
+        }
         if (isMobileView) {
           if (isFullscreen) {
             return;
@@ -676,6 +752,9 @@ function BookPage({
       role="button"
       tabIndex={0}
       onKeyDown={(event) => {
+        if (zoomScale > 1) {
+          return;
+        }
         if (isMobileView) {
           return;
         }
