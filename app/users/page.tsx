@@ -144,7 +144,6 @@ export default function UsersPage() {
                   <th className="px-2 py-2 font-semibold">Email</th>
                   <th className="px-2 py-2 font-semibold">Username</th>
                   <th className="px-2 py-2 font-semibold">Role</th>
-                  <th className="px-2 py-2 font-semibold">Created</th>
                   <th className="px-2 py-2 font-semibold">Password</th>
                   <th className="px-2 py-2 font-semibold">Action</th>
                 </tr>
@@ -155,7 +154,6 @@ export default function UsersPage() {
                     <td className="px-2 py-2">{listedUser.email || "-"}</td>
                     <td className="px-2 py-2">{listedUser.username || "-"}</td>
                     <td className="px-2 py-2">{listedUser.role || "-"}</td>
-                    <td className="px-2 py-2">{formatCreatedAt(listedUser.createdAt)}</td>
                     <td className="px-2 py-2">
                       {(() => {
                         const userPassword = listedUser.password ?? listedUser.passwordHash ?? "";
@@ -245,17 +243,4 @@ function getBackendErrorMessage(error: unknown): string {
   }
 
   return "Failed to create user.";
-}
-
-function formatCreatedAt(createdAt?: string): string {
-  if (!createdAt) {
-    return "-";
-  }
-
-  const parsedDate = new Date(createdAt);
-  if (Number.isNaN(parsedDate.getTime())) {
-    return createdAt;
-  }
-
-  return parsedDate.toLocaleString();
 }

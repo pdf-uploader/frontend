@@ -29,8 +29,15 @@ export function Navbar() {
     <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/85 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-5">
-          <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
-            <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+          <Link href="/" className="inline-flex items-center gap-2.5 text-lg font-bold text-slate-900 sm:text-2xl">
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              className="h-8 w-8 text-sky-400 sm:h-9 sm:w-9"
+              fill="currentColor"
+            >
+              <path d="M2.25 7.5A2.25 2.25 0 0 1 4.5 5.25h4.74a2.25 2.25 0 0 1 1.59.66l1.5 1.5a2.25 2.25 0 0 0 1.59.66h5.58a2.25 2.25 0 0 1 2.25 2.25v6.18a2.25 2.25 0 0 1-2.25 2.25H4.5a2.25 2.25 0 0 1-2.25-2.25V7.5Z" />
+            </svg>
             File Manager
           </Link>
           <nav className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600">
@@ -48,7 +55,7 @@ export function Navbar() {
           </nav>
         </div>
         <div className="flex items-center gap-3">
-          <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold tracking-wide text-slate-700">
+          <p className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold tracking-wide text-emerald-800">
             {roleLabel}
           </p>
           <p className="hidden rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500 sm:block">{user?.email}</p>
