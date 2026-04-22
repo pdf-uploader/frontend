@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Fragment, ReactNode } from "react";
-import { DragEvent, useEffect, useMemo, useState } from "react";
+import { DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useDebounce } from "use-debounce";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,6 +18,18 @@ interface GlobalFindItem {
     page: number;
     content: string;
   }>;
+}
+
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+}
+
+interface AssistantTypingState {
+  messageId: string;
+  fullText: string;
+  cursor: number;
 }
 
 const PAGE_CHUNK_SIZE = 5;
@@ -38,6 +50,17 @@ export function FolderBrowser() {
   const [orderedFolders, setOrderedFolders] = useState<Folder[]>([]);
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: "assistant-greeting",
+      role: "assistant",
+      text: "Hello! Ask me anything about your documents.",
+    },
+  ]);
+  const [assistantTyping, setAssistantTyping] = useState<AssistantTypingState | null>(null);
+  const chatViewportRef = useRef<HTMLDivElement | null>(null);
 
   const [debouncedGlobalSearch] = useDebounce(globalSearch, 300);
 
@@ -81,10 +104,37 @@ export function FolderBrowser() {
     },
   });
 
-  const saveFolderOrderMutation = useMutation({
-    mutationFn: async (folderIds: string[]) => api.patch("/folders/order", { folderIds }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["folders"] });
+  const chatMutation = useMutation({
+    mutationFn: async (message: string) => {
+      const response = await api.post("/chatbot/chat", { message });
+      return resolveChatbotText(response.data);
+    },
+    onSuccess: (answer) => {
+      const assistantMessageId = `${Date.now()}-assistant`;
+      const resolvedText = answer || "I couldn't generate a response. Please try again.";
+      setChatMessages((previous) => [
+        ...previous,
+        {
+          id: assistantMessageId,
+          role: "assistant",
+          text: "",
+        },
+      ]);
+      setAssistantTyping({
+        messageId: assistantMessageId,
+        fullText: resolvedText,
+        cursor: 0,
+      });
+    },
+    onError: () => {
+      setChatMessages((previous) => [
+        ...previous,
+        {
+          id: `${Date.now()}-assistant-error`,
+          role: "assistant",
+          text: "Something went wrong while contacting the chatbot. Please try again.",
+        },
+      ]);
     },
   });
 
@@ -92,9 +142,6 @@ export function FolderBrowser() {
     () => (foldersQuery.data ?? []).map((folder) => folder.id).join("|"),
     [foldersQuery.data]
   );
-  const localFolderOrderSignature = orderedFolders.map((folder) => folder.id).join("|");
-  const hasFolderOrderChanges =
-    Boolean(localFolderOrderSignature) && localFolderOrderSignature !== serverFolderOrderSignature;
   const searchContextHref = useMemo(() => {
     const params = new URLSearchParams();
     const trimmed = globalSearch.trim();
@@ -131,14 +178,66 @@ export function FolderBrowser() {
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
   }, [debouncedGlobalSearch, pathname, router, searchParams]);
 
-  const moveFolderByStep = (index: number, direction: -1 | 1) => {
-    setOrderedFolders((previous) => {
-      const targetIndex = index + direction;
-      if (targetIndex < 0 || targetIndex >= previous.length) {
-        return previous;
-      }
-      return moveFolder(previous, index, targetIndex);
+  useEffect(() => {
+    if (!chatViewportRef.current) {
+      return;
+    }
+    chatViewportRef.current.scrollTo({
+      top: chatViewportRef.current.scrollHeight,
+      behavior: "smooth",
     });
+  }, [chatMessages, chatMutation.isPending, isChatOpen]);
+
+  useEffect(() => {
+    if (!assistantTyping) {
+      return;
+    }
+    if (assistantTyping.cursor >= assistantTyping.fullText.length) {
+      setAssistantTyping(null);
+      return;
+    }
+
+    const currentChar = assistantTyping.fullText.charAt(assistantTyping.cursor);
+    const delay = /[,.!?]/.test(currentChar) ? 85 : /\s/.test(currentChar) ? 22 : 14;
+
+    const timer = window.setTimeout(() => {
+      const nextCursor = assistantTyping.cursor + 1;
+      setChatMessages((previous) =>
+        previous.map((message) =>
+          message.id === assistantTyping.messageId
+            ? {
+                ...message,
+                text: assistantTyping.fullText.slice(0, nextCursor),
+              }
+            : message
+        )
+      );
+      setAssistantTyping((previous) =>
+        previous && previous.messageId === assistantTyping.messageId
+          ? { ...previous, cursor: nextCursor }
+          : previous
+      );
+    }, delay);
+
+    return () => window.clearTimeout(timer);
+  }, [assistantTyping]);
+
+  const submitChatMessage = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedMessage = chatInput.trim();
+    if (!trimmedMessage || chatMutation.isPending || assistantTyping) {
+      return;
+    }
+    setChatMessages((previous) => [
+      ...previous,
+      {
+        id: `${Date.now()}-user`,
+        role: "user",
+        text: trimmedMessage,
+      },
+    ]);
+    setChatInput("");
+    chatMutation.mutate(trimmedMessage);
   };
 
   const onFolderDrop = (event: DragEvent<HTMLElement>, targetFolderId: string) => {
@@ -230,27 +329,6 @@ export function FolderBrowser() {
 
       {foldersQuery.isLoading && <p className="text-sm text-slate-600">Loading folders...</p>}
       {foldersQuery.error && <p className="text-sm text-red-600">Could not load folders.</p>}
-      {admin && orderedFolders.length > 1 && (
-        <div className="ui-card flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-xs text-slate-700">
-          <p>Drag folders to reorder, then save order.</p>
-          <button
-            type="button"
-            onClick={() => saveFolderOrderMutation.mutate(orderedFolders.map((folder) => folder.id))}
-            disabled={!hasFolderOrderChanges || saveFolderOrderMutation.isPending}
-            className="ui-btn-primary px-3 py-1.5 text-xs"
-          >
-            {saveFolderOrderMutation.isPending ? "Saving folder order..." : "Save folder order"}
-          </button>
-        </div>
-      )}
-      {saveFolderOrderMutation.error && (
-        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-          {saveFolderOrderMutation.error instanceof Error
-            ? saveFolderOrderMutation.error.message
-            : "Could not save folder order. Ensure backend supports PATCH /folders/order."}
-        </p>
-      )}
-
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {orderedFolders.map((folder, index) => (
           <Link
@@ -286,30 +364,6 @@ export function FolderBrowser() {
               </div>
               {admin && (
                 <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      moveFolderByStep(index, -1);
-                    }}
-                    disabled={index === 0}
-                    className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
-                    title="Move folder up"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      moveFolderByStep(index, 1);
-                    }}
-                    disabled={index === orderedFolders.length - 1}
-                    className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
-                    title="Move folder down"
-                  >
-                    ↓
-                  </button>
                   <button
                     onClick={(event) => {
                       event.preventDefault();
@@ -359,6 +413,71 @@ export function FolderBrowser() {
           </Link>
         ))}
       </div>
+
+      <button
+        onClick={() => setIsChatOpen((previous) => !previous)}
+        title={isChatOpen ? "Hide chatbot" : "Open chatbot"}
+        className="fixed bottom-5 right-5 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-xl text-white shadow-lg transition hover:scale-105 hover:bg-slate-800"
+      >
+        💬
+      </button>
+
+      {isChatOpen && (
+        <div className="fixed bottom-20 right-5 z-40 flex h-[28rem] w-[22rem] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+            <p className="text-sm font-semibold text-slate-900">Chatbot</p>
+            <button
+              onClick={() => setIsChatOpen(false)}
+              title="Close chatbot"
+              className="rounded-md px-2 py-1 text-xs text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+            >
+              Close
+            </button>
+          </div>
+          <div ref={chatViewportRef} className="flex-1 space-y-3 overflow-y-auto bg-slate-50 px-3 py-3">
+            {chatMessages.map((message) => (
+              <div
+                key={message.id}
+                className={[
+                  "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm",
+                  message.role === "user"
+                    ? "ml-auto bg-slate-900 text-white"
+                    : "mr-auto border border-slate-200 bg-white text-slate-800",
+                ].join(" ")}
+              >
+                <p className="whitespace-pre-wrap break-words">
+                  {message.text}
+                  {assistantTyping?.messageId === message.id && (
+                    <span className="ml-0.5 inline-block h-4 w-1 animate-pulse rounded-sm bg-slate-400 align-middle" />
+                  )}
+                </p>
+              </div>
+            ))}
+            {chatMutation.isPending && (
+              <div className="mr-auto max-w-[85%] rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                <LoadingBlinkDot />
+              </div>
+            )}
+          </div>
+          <form onSubmit={submitChatMessage} className="border-t border-slate-200 bg-white p-3">
+            <div className="flex items-center gap-2">
+              <input
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+                placeholder="Type your message..."
+                className="ui-input h-10 flex-1 text-sm"
+              />
+              <button
+                type="submit"
+                disabled={!chatInput.trim() || chatMutation.isPending || Boolean(assistantTyping)}
+                className="inline-flex h-10 items-center justify-center rounded-full bg-slate-900 px-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Send
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </section>
   );
 }
@@ -500,4 +619,60 @@ function normalizePreviewText(content: string): string {
     .replace(/([^\x00-\x7F])([A-Za-z0-9])/g, "$1 $2")
     .replace(/([,.;:!?])(?=\S)/g, "$1 ")
     .trim();
+}
+
+function resolveChatbotText(payload: unknown): string {
+  if (typeof payload === "string") {
+    return payload;
+  }
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+
+  const recordPayload = payload as Record<string, unknown>;
+  const directMessage = recordPayload.message;
+  if (typeof directMessage === "string") {
+    return directMessage;
+  }
+
+  const responseMessage = recordPayload.response;
+  if (typeof responseMessage === "string") {
+    return responseMessage;
+  }
+
+  const data = recordPayload.data;
+  if (data && typeof data === "object") {
+    const nestedMessage = (data as Record<string, unknown>).message;
+    if (typeof nestedMessage === "string") {
+      return nestedMessage;
+    }
+    const nestedResponse = (data as Record<string, unknown>).response;
+    if (typeof nestedResponse === "string") {
+      return nestedResponse;
+    }
+  }
+
+  return "";
+}
+
+function LoadingBlinkDot() {
+  const [isVisible, setIsVisible] = useState(true);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setIsVisible((previous) => !previous);
+    }, 420);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="flex items-center py-1">
+      <span
+        className={[
+          "h-2.5 w-2.5 rounded-full bg-slate-400 transition-opacity duration-200",
+          isVisible ? "opacity-100" : "opacity-15",
+        ].join(" ")}
+      />
+    </div>
+  );
 }
