@@ -12,7 +12,6 @@ export function Navbar() {
   const pathname = usePathname();
   const { user, token } = useAuth();
   const isUsersActive = pathname.startsWith("/users");
-  const isAdminAreaActive = pathname === "/" || pathname.startsWith("/folders") || pathname.startsWith("/files");
   const roleLabel = isAdminUser(user) ? "ADMIN" : "USER";
 
   const logoutMutation = useMutation({
@@ -35,15 +34,6 @@ export function Navbar() {
             File Manager
           </Link>
           <nav className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600">
-            <Link
-              href="/"
-              className={[
-                "rounded-full px-3 py-1.5 transition",
-                isAdminAreaActive ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-400 hover:text-slate-600",
-              ].join(" ")}
-            >
-              Administrator
-            </Link>
             {isAdminUser(user) && (
               <Link
                 href="/users"
@@ -52,7 +42,7 @@ export function Navbar() {
                   isUsersActive ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-400 hover:text-slate-600",
                 ].join(" ")}
               >
-                Users
+                Manage Users
               </Link>
             )}
           </nav>

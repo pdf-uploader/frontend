@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Fragment, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useDebounce } from "use-debounce";
@@ -245,13 +246,25 @@ export function FolderBrowser() {
   );
 }
 
-function highlightKeyword(text: string, keyword: string): string {
-  if (!keyword.trim()) {
+function highlightKeyword(text: string, keyword: string): ReactNode {
+  const trimmedKeyword = keyword.trim();
+  if (!trimmedKeyword) {
     return text;
   }
-  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`(${escaped})`, "gi");
-  return text.replace(regex, '<mark style="background:#fde68a;padding:0 2px;">$1</mark>');
+
+  const escapedKeyword = trimmedKeyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escapedKeyword})`, "gi");
+  const segments = text.split(regex);
+
+  return segments.map((segment, index) =>
+    segment.toLowerCase() === trimmedKeyword.toLowerCase() ? (
+      <mark key={`${segment}-${index}`} className="rounded bg-amber-200 px-0.5">
+        {segment}
+      </mark>
+    ) : (
+      <Fragment key={`${segment}-${index}`}>{segment}</Fragment>
+    )
+  );
 }
 
 function GlobalSearchItem({ item, keyword, returnTo }: { item: GlobalFindItem; keyword: string; returnTo: string }) {
@@ -277,7 +290,7 @@ function GlobalSearchItem({ item, keyword, returnTo }: { item: GlobalFindItem; k
 
   return (
     <li className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-      <Link href={`/files/${item.id}`} className="font-medium text-slate-800 hover:underline">
+      <Link href={`/files/${item.id}`} className="text-base font-semibold text-slate-900 hover:underline sm:text-lg">
         {item.filename}
       </Link>
       {pagedEntries.length > 0 && (
@@ -290,15 +303,12 @@ function GlobalSearchItem({ item, keyword, returnTo }: { item: GlobalFindItem; k
                   className="block rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-bold text-slate-800 sm:text-base">Page {entry.page}</span>
+                    <span className="text-sm font-semibold text-slate-800 sm:text-base">Page {entry.page}</span>
                     <span className="text-[11px] text-slate-500">Open</span>
                   </div>
-                  <p
-                    className="mt-1 text-[13px] text-slate-700 sm:text-sm"
-                    dangerouslySetInnerHTML={{
-                      __html: highlightKeyword(entry.snippet, keyword),
-                    }}
-                  />
+                  <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-700 sm:text-sm">
+                    {highlightKeyword(entry.snippet, keyword)}
+                  </p>
                 </Link>
               </li>
             ))}
@@ -331,14 +341,36 @@ function GlobalSearchItem({ item, keyword, returnTo }: { item: GlobalFindItem; k
 }
 
 function extractSentencePreview(content: string, keyword: string): string {
-  const normalized = content.replace(/\s+/g, " ").trim();
+  const normalized = normalizePreviewText(content);
   if (!normalized) {
     return "...";
   }
-  const sentences = normalized.split(/(?<=[.!?])\s+/);
   const lowerKeyword = keyword.trim().toLowerCase();
-  const picked =
-    sentences.find((sentence) => lowerKeyword && sentence.toLowerCase().includes(lowerKeyword)) ?? sentences[0];
-  const clipped = picked.length > 180 ? `${picked.slice(0, 180)}...` : picked;
-  return `...${clipped}...`;
+  const maxLength = 220;
+  const contextRadius = 110;
+
+  if (!lowerKeyword) {
+    return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+  }
+
+  const matchIndex = normalized.toLowerCase().indexOf(lowerKeyword);
+  if (matchIndex < 0) {
+    return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+  }
+
+  const start = Math.max(0, matchIndex - contextRadius);
+  const end = Math.min(normalized.length, matchIndex + lowerKeyword.length + contextRadius);
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < normalized.length ? "..." : "";
+  return `${prefix}${normalized.slice(start, end)}${suffix}`;
+}
+
+function normalizePreviewText(content: string): string {
+  return content
+    .replace(/\s+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Za-z0-9])([^\x00-\x7F])/g, "$1 $2")
+    .replace(/([^\x00-\x7F])([A-Za-z0-9])/g, "$1 $2")
+    .replace(/([,.;:!?])(?=\S)/g, "$1 ")
+    .trim();
 }

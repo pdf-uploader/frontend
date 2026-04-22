@@ -15,7 +15,8 @@ export default function UsersPage() {
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+  const [isCreatePasswordHidden, setIsCreatePasswordHidden] = useState(true);
+  const [visibleUserPasswords, setVisibleUserPasswords] = useState<Record<string, boolean>>({});
   const usersQuery = useQuery({
     queryKey: ["users"],
     queryFn: async () => (await api.get<AppUser[]>("/users")).data,
@@ -55,6 +56,10 @@ export default function UsersPage() {
     event.preventDefault();
     createUserMutation.mutate();
   };
+
+  const toggleUserPasswordVisibility = (userId: string) => {
+    setVisibleUserPasswords((previous) => ({ ...previous, [userId]: !previous[userId] }));
+  };
   const createUserErrorMessage = getBackendErrorMessage(createUserMutation.error);
 
   return (
@@ -84,7 +89,7 @@ export default function UsersPage() {
         />
         <div className="relative">
           <input
-            type={showPassword ? "text" : "password"}
+            type={isCreatePasswordHidden ? "password" : "text"}
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             placeholder="Password"
@@ -93,11 +98,11 @@ export default function UsersPage() {
           />
           <button
             type="button"
-            onClick={() => setShowPassword((previous) => !previous)}
-            aria-label={showPassword ? "Hide password" : "Show password"}
+            onClick={() => setIsCreatePasswordHidden((previous) => !previous)}
+            aria-label={isCreatePasswordHidden ? "Show password" : "Hide password"}
             className="absolute inset-y-0 right-0 inline-flex items-center justify-center px-3 text-slate-500 hover:text-slate-700"
           >
-            {showPassword ? (
+            {isCreatePasswordHidden ? (
               <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M3 3l18 18" />
                 <path d="M10.58 10.58a2 2 0 102.84 2.84" />
@@ -139,6 +144,7 @@ export default function UsersPage() {
                   <th className="px-2 py-2 font-semibold">Email</th>
                   <th className="px-2 py-2 font-semibold">Username</th>
                   <th className="px-2 py-2 font-semibold">Role</th>
+                  <th className="px-2 py-2 font-semibold">Created</th>
                   <th className="px-2 py-2 font-semibold">Password</th>
                   <th className="px-2 py-2 font-semibold">Action</th>
                 </tr>
@@ -149,7 +155,42 @@ export default function UsersPage() {
                     <td className="px-2 py-2">{listedUser.email || "-"}</td>
                     <td className="px-2 py-2">{listedUser.username || "-"}</td>
                     <td className="px-2 py-2">{listedUser.role || "-"}</td>
-                    <td className="px-2 py-2">{listedUser.password ?? listedUser.passwordHash ?? "-"}</td>
+                    <td className="px-2 py-2">{formatCreatedAt(listedUser.createdAt)}</td>
+                    <td className="px-2 py-2">
+                      {(() => {
+                        const userPassword = listedUser.password ?? listedUser.passwordHash ?? "";
+                        if (!userPassword) {
+                          return <span>-</span>;
+                        }
+
+                        const isPasswordVisible = !!visibleUserPasswords[listedUser.id];
+                        return (
+                          <div className="inline-flex items-center gap-2">
+                            <span>{isPasswordVisible ? userPassword : "*".repeat(Math.max(userPassword.length, 8))}</span>
+                            <button
+                              type="button"
+                              onClick={() => toggleUserPasswordVisibility(listedUser.id)}
+                              aria-label={isPasswordVisible ? "Hide password" : "Show password"}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                            >
+                              {isPasswordVisible ? (
+                                <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
+                                  <circle cx="12" cy="12" r="3" />
+                                </svg>
+                              ) : (
+                                <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M3 3l18 18" />
+                                  <path d="M10.58 10.58a2 2 0 102.84 2.84" />
+                                  <path d="M9.88 5.09A10.94 10.94 0 0112 5c5.05 0 9.27 3.11 10 7-.21 1.13-.73 2.2-1.5 3.11" />
+                                  <path d="M6.61 6.61C4.62 7.9 3.26 9.82 3 12c.73 3.89 4.95 7 10 7 2.18 0 4.2-.58 5.9-1.59" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td className="px-2 py-2">
                       <button
                         type="button"
@@ -204,4 +245,17 @@ function getBackendErrorMessage(error: unknown): string {
   }
 
   return "Failed to create user.";
+}
+
+function formatCreatedAt(createdAt?: string): string {
+  if (!createdAt) {
+    return "-";
+  }
+
+  const parsedDate = new Date(createdAt);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return createdAt;
+  }
+
+  return parsedDate.toLocaleString();
 }
