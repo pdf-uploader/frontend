@@ -39,6 +39,7 @@ body {
   color: var(--text-primary);
   font-family:
     Inter,
+    "Noto Sans KR",
     "SF Pro Text",
     "SF Pro Display",
     -apple-system,

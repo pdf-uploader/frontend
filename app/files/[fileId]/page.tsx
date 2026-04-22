@@ -503,7 +503,7 @@ export default function FileViewerPage() {
                   </button>
                 )}
               </div>
-              <h1 className="truncate text-base font-semibold text-slate-900 sm:text-lg">{displayFilename}</h1>
+              <h1 className="truncate break-keep text-base font-semibold text-slate-900 sm:text-lg">{displayFilename}</h1>
             </div>
             <div className="flex items-center gap-2">
               <button

@@ -38,7 +38,7 @@ export function Navbar() {
             >
               <path d="M2.25 7.5A2.25 2.25 0 0 1 4.5 5.25h4.74a2.25 2.25 0 0 1 1.59.66l1.5 1.5a2.25 2.25 0 0 0 1.59.66h5.58a2.25 2.25 0 0 1 2.25 2.25v6.18a2.25 2.25 0 0 1-2.25 2.25H4.5a2.25 2.25 0 0 1-2.25-2.25V7.5Z" />
             </svg>
-            File Manager
+            File Management
           </Link>
           <nav className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600">
             {isAdminUser(user) && (

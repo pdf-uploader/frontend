@@ -333,7 +333,7 @@ export default function FolderPage() {
           >
             <div className="flex min-w-0 items-center gap-2">
               {admin && <span className="text-slate-400">⋮⋮</span>}
-              <Link href={`/files/${file.id}`} className="truncate text-slate-700 hover:underline">
+              <Link href={`/files/${file.id}`} className="truncate break-keep text-slate-700 hover:underline">
                 📄 {file.filename}
               </Link>
             </div>
@@ -402,7 +402,7 @@ function FolderSearchItem({ item, keyword, returnTo }: { item: FileVersionItem; 
 
   return (
     <li className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-      <Link href={`/files/${item.id}`} className="text-base font-semibold text-slate-900 hover:underline sm:text-lg">
+      <Link href={`/files/${item.id}`} className="break-keep break-words text-base font-semibold text-slate-900 hover:underline sm:text-lg">
         {item.filename}
       </Link>
       {pagedEntries.length > 0 && (

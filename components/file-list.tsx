@@ -27,7 +27,7 @@ export function FileList({ files }: { files: FolderFile[] }) {
           {files.map((file) => (
             <tr key={file.id} className="border-t border-slate-100">
               <td className="px-4 py-3">
-                <Link className="text-blue-600 hover:underline" href={`/files/${file.id}`}>
+                <Link className="break-keep break-words text-blue-600 hover:underline" href={`/files/${file.id}`}>
                   {file.filename}
                 </Link>
               </td>

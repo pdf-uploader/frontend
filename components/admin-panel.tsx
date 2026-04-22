@@ -193,7 +193,7 @@ export function AdminPanel() {
           {foldersQuery.data?.flatMap((folder) =>
             folder.files.map((file) => (
               <li key={file.id} className="flex items-center justify-between rounded border border-slate-200 p-2">
-                <span className="truncate pr-2">{file.filename}</span>
+                <span className="truncate break-keep pr-2">{file.filename}</span>
                 <button onClick={() => deleteFileMutation.mutate(file.id)} className="text-xs text-red-600">
                   Delete
                 </button>

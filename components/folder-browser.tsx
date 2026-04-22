@@ -290,7 +290,7 @@ function GlobalSearchItem({ item, keyword, returnTo }: { item: GlobalFindItem; k
 
   return (
     <li className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-      <Link href={`/files/${item.id}`} className="text-base font-semibold text-slate-900 hover:underline sm:text-lg">
+      <Link href={`/files/${item.id}`} className="break-keep break-words text-base font-semibold text-slate-900 hover:underline sm:text-lg">
         {item.filename}
       </Link>
       {pagedEntries.length > 0 && (

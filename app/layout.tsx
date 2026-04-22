@@ -11,10 +11,10 @@ export const metadata: Metadata = {
   title: "File Management",
   description: "File management and search frontend",
   manifest: "/mainfest.json",
-  applicationName: "Interactive File Manager",
+  applicationName: "Interactive File Management",
   appleWebApp: {
     capable: true,
-    title: "File Manager",
+    title: "File Management",
     statusBarStyle: "black-translucent",
   },
   icons: {

@@ -15,7 +15,7 @@ export function FolderCard({ folder }: { folder: Folder }) {
       </div>
       <ul className="space-y-1 text-sm text-slate-600">
         {folder.files.slice(0, 3).map((file) => (
-          <li key={file.id} className="truncate">
+          <li key={file.id} className="truncate break-keep">
             {file.filename}
           </li>
         ))}
