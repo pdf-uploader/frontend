@@ -26,6 +26,9 @@ export interface FolderFile {
 export interface Folder {
   id: string;
   foldername: string;
+  createdAt?: string;
+  updatedAt?: string;
+  sortOrder?: number;
   files: FolderFile[];
 }
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Fragment, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { DragEvent, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useDebounce } from "use-debounce";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -35,6 +35,9 @@ export function FolderBrowser() {
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [folderNameDraft, setFolderNameDraft] = useState("");
+  const [orderedFolders, setOrderedFolders] = useState<Folder[]>([]);
+  const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
 
   const [debouncedGlobalSearch] = useDebounce(globalSearch, 300);
 
@@ -78,7 +81,20 @@ export function FolderBrowser() {
     },
   });
 
-  const sortedFolders = useMemo(() => foldersQuery.data ?? [], [foldersQuery.data]);
+  const saveFolderOrderMutation = useMutation({
+    mutationFn: async (folderIds: string[]) => api.patch("/folders/order", { folderIds }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
+    },
+  });
+
+  const serverFolderOrderSignature = useMemo(
+    () => (foldersQuery.data ?? []).map((folder) => folder.id).join("|"),
+    [foldersQuery.data]
+  );
+  const localFolderOrderSignature = orderedFolders.map((folder) => folder.id).join("|");
+  const hasFolderOrderChanges =
+    Boolean(localFolderOrderSignature) && localFolderOrderSignature !== serverFolderOrderSignature;
   const searchContextHref = useMemo(() => {
     const params = new URLSearchParams();
     const trimmed = globalSearch.trim();
@@ -92,6 +108,10 @@ export function FolderBrowser() {
   useEffect(() => {
     setGlobalSearch(urlKeyword);
   }, [urlKeyword]);
+
+  useEffect(() => {
+    setOrderedFolders(foldersQuery.data ?? []);
+  }, [serverFolderOrderSignature, foldersQuery.data]);
 
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -110,6 +130,36 @@ export function FolderBrowser() {
 
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
   }, [debouncedGlobalSearch, pathname, router, searchParams]);
+
+  const moveFolderByStep = (index: number, direction: -1 | 1) => {
+    setOrderedFolders((previous) => {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= previous.length) {
+        return previous;
+      }
+      return moveFolder(previous, index, targetIndex);
+    });
+  };
+
+  const onFolderDrop = (event: DragEvent<HTMLElement>, targetFolderId: string) => {
+    event.preventDefault();
+    if (!admin || !draggedFolderId || draggedFolderId === targetFolderId) {
+      setDragOverFolderId(null);
+      return;
+    }
+
+    setOrderedFolders((previous) => {
+      const fromIndex = previous.findIndex((item) => item.id === draggedFolderId);
+      const toIndex = previous.findIndex((item) => item.id === targetFolderId);
+      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+        return previous;
+      }
+      return moveFolder(previous, fromIndex, toIndex);
+    });
+
+    setDragOverFolderId(null);
+    setDraggedFolderId(null);
+  };
 
   return (
     <section className="space-y-5">
@@ -180,31 +230,98 @@ export function FolderBrowser() {
 
       {foldersQuery.isLoading && <p className="text-sm text-slate-600">Loading folders...</p>}
       {foldersQuery.error && <p className="text-sm text-red-600">Could not load folders.</p>}
+      {admin && orderedFolders.length > 1 && (
+        <div className="ui-card flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-xs text-slate-700">
+          <p>Drag folders to reorder, then save order.</p>
+          <button
+            type="button"
+            onClick={() => saveFolderOrderMutation.mutate(orderedFolders.map((folder) => folder.id))}
+            disabled={!hasFolderOrderChanges || saveFolderOrderMutation.isPending}
+            className="ui-btn-primary px-3 py-1.5 text-xs"
+          >
+            {saveFolderOrderMutation.isPending ? "Saving folder order..." : "Save folder order"}
+          </button>
+        </div>
+      )}
+      {saveFolderOrderMutation.error && (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {saveFolderOrderMutation.error instanceof Error
+            ? saveFolderOrderMutation.error.message
+            : "Could not save folder order. Ensure backend supports PATCH /folders/order."}
+        </p>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {sortedFolders.map((folder) => (
+        {orderedFolders.map((folder, index) => (
           <Link
             key={folder.id}
             href={`/folders/${folder.id}`}
-            className="block rounded-2xl border border-slate-200/90 bg-white/95 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
+            draggable={admin}
+            onDragStart={() => {
+              if (!admin) return;
+              setDraggedFolderId(folder.id);
+            }}
+            onDragOver={(event) => {
+              if (!admin) return;
+              event.preventDefault();
+              if (draggedFolderId !== folder.id) {
+                setDragOverFolderId(folder.id);
+              }
+            }}
+            onDrop={(event) => onFolderDrop(event, folder.id)}
+            onDragEnd={() => {
+              setDragOverFolderId(null);
+              setDraggedFolderId(null);
+            }}
+            className={[
+              "block rounded-2xl border bg-white/95 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md",
+              dragOverFolderId === folder.id ? "border-slate-400 bg-slate-100" : "border-slate-200/90",
+            ].join(" ")}
           >
             <div className="mb-2 flex items-start justify-between gap-2">
               <div className="flex items-center gap-2">
+                {admin && <span className="text-sm text-slate-400">⋮⋮</span>}
                 <span className="text-xl">📁</span>
                 <span className="text-sm font-semibold text-slate-900">{folder.foldername}</span>
               </div>
               {admin && (
-                <button
-                  onClick={(event) => {
-                    event.preventDefault();
-                    setEditingFolderId((prev) => (prev === folder.id ? null : folder.id));
-                    setFolderNameDraft(folder.foldername);
-                  }}
-                  className="rounded p-1 text-slate-500 hover:bg-slate-100"
-                  title="Edit folder"
-                >
-                  ✏️
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      moveFolderByStep(index, -1);
+                    }}
+                    disabled={index === 0}
+                    className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                    title="Move folder up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      moveFolderByStep(index, 1);
+                    }}
+                    disabled={index === orderedFolders.length - 1}
+                    className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                    title="Move folder down"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    onClick={(event) => {
+                      event.preventDefault();
+                      setEditingFolderId((prev) => (prev === folder.id ? null : folder.id));
+                      setFolderNameDraft(folder.foldername);
+                    }}
+                    className="rounded p-1 text-slate-500 hover:bg-slate-100"
+                    title="Edit folder"
+                  >
+                    ✏️
+                  </button>
+                </div>
               )}
             </div>
             <p className="text-xs text-slate-500">
@@ -244,6 +361,16 @@ export function FolderBrowser() {
       </div>
     </section>
   );
+}
+
+function moveFolder(folders: Folder[], fromIndex: number, toIndex: number): Folder[] {
+  const cloned = [...folders];
+  const [picked] = cloned.splice(fromIndex, 1);
+  if (!picked) {
+    return folders;
+  }
+  cloned.splice(toIndex, 0, picked);
+  return cloned;
 }
 
 function highlightKeyword(text: string, keyword: string): ReactNode {

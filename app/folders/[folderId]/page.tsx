@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, DragEvent, Fragment, ReactNode, useEffect, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useDebounce } from "use-debounce";
@@ -22,6 +22,8 @@ interface FileVersionItem {
 }
 
 const PAGE_CHUNK_SIZE = 5;
+type FileSortField = "filename" | "createdAt" | "number";
+type SortDirection = "desc" | "asc";
 
 export default function FolderPage() {
   const params = useParams<{ folderId: string }>();
@@ -36,8 +38,8 @@ export default function FolderPage() {
   const [dragging, setDragging] = useState(false);
   const [dragCounter, setDragCounter] = useState(0);
   const [orderedFiles, setOrderedFiles] = useState<FolderFile[]>([]);
-  const [draggedFileId, setDraggedFileId] = useState<string | null>(null);
-  const [dragOverFileId, setDragOverFileId] = useState<string | null>(null);
+  const [fileSortField, setFileSortField] = useState<FileSortField | null>(null);
+  const [fileSortDirection, setFileSortDirection] = useState<SortDirection>("desc");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [debouncedFolderSearch] = useDebounce(folderSearch, 300);
 
@@ -75,13 +77,6 @@ export default function FolderPage() {
     mutationFn: async (fileId: string) => api.delete(`/files/${fileId}`),
     onSuccess: (_, deletedFileId) => {
       setOrderedFiles((prev) => prev.filter((file) => file.id !== deletedFileId));
-      folderQuery.refetch();
-    },
-  });
-
-  const saveOrderMutation = useMutation({
-    mutationFn: async (fileIds: string[]) => api.patch(`/folders/${folderId}/files/order`, { fileIds }),
-    onSuccess: () => {
       folderQuery.refetch();
     },
   });
@@ -134,6 +129,31 @@ export default function FolderPage() {
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
   }, [debouncedFolderSearch, pathname, router, searchParams]);
 
+  const visibleFiles = useMemo(() => {
+    if (!fileSortField) {
+      return orderedFiles;
+    }
+
+    const sorted = [...orderedFiles];
+    sorted.sort((a, b) => {
+      if (fileSortField === "number") {
+        const compared = compareVersionLikeFilename(a.filename, b.filename);
+        return fileSortDirection === "desc" ? -compared : compared;
+      }
+
+      if (fileSortField === "filename") {
+        const compared = a.filename.localeCompare(b.filename, "ko", { sensitivity: "base" });
+        return fileSortDirection === "desc" ? -compared : compared;
+      }
+
+      const left = new Date(a.createdAt).getTime();
+      const right = new Date(b.createdAt).getTime();
+      const compared = left - right;
+      return fileSortDirection === "desc" ? -compared : compared;
+    });
+    return sorted;
+  }, [fileSortDirection, fileSortField, orderedFiles]);
+
   if (folderQuery.isLoading) {
     return <p className="text-sm text-slate-600">Loading folder...</p>;
   }
@@ -141,9 +161,6 @@ export default function FolderPage() {
   if (folderQuery.error || !folder) {
     return <p className="text-sm text-red-600">Folder not found or unavailable.</p>;
   }
-
-  const localOrderSignature = orderedFiles.map((file) => file.id).join("|");
-  const hasOrderChanges = Boolean(localOrderSignature) && localOrderSignature !== fileOrderSignature;
 
   const onDropped = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
@@ -165,14 +182,13 @@ export default function FolderPage() {
     event.target.value = "";
   };
 
-  const moveFileByStep = (index: number, direction: -1 | 1) => {
-    setOrderedFiles((prev) => {
-      const targetIndex = index + direction;
-      if (targetIndex < 0 || targetIndex >= prev.length) {
-        return prev;
-      }
-      return moveFile(prev, index, targetIndex);
-    });
+  const toggleFileSort = (field: FileSortField) => {
+    if (fileSortField !== field) {
+      setFileSortField(field);
+      setFileSortDirection("desc");
+      return;
+    }
+    setFileSortDirection((previous) => (previous === "desc" ? "asc" : "desc"));
   };
 
   return (
@@ -263,26 +279,47 @@ export default function FolderPage() {
                 onChange={onFilePick}
               />
             </div>
-            {orderedFiles.length > 1 && (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
-                <p>Drag and drop files in the list to reorder them, then save.</p>
-                <button
-                  onClick={() => saveOrderMutation.mutate(orderedFiles.map((file) => file.id))}
-                  disabled={!hasOrderChanges || saveOrderMutation.isPending}
-                  className="ui-btn-primary px-3 py-1.5 text-xs"
-                >
-                  {saveOrderMutation.isPending ? "Saving order..." : "Save order"}
-                </button>
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <p className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sort</p>
+              <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1">
+              <button
+                type="button"
+                onClick={() => toggleFileSort("filename")}
+                className={[
+                  "rounded-full px-3 py-1.5 font-medium transition",
+                  fileSortField === "filename"
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-white hover:text-slate-900",
+                ].join(" ")}
+              >
+                Filename {fileSortField === "filename" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleFileSort("number")}
+                className={[
+                  "rounded-full px-3 py-1.5 font-medium transition",
+                  fileSortField === "number"
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-white hover:text-slate-900",
+                ].join(" ")}
+              >
+                Number {fileSortField === "number" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleFileSort("createdAt")}
+                className={[
+                  "rounded-full px-3 py-1.5 font-medium transition",
+                  fileSortField === "createdAt"
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-white hover:text-slate-900",
+                ].join(" ")}
+              >
+                Created {fileSortField === "createdAt" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}
+              </button>
               </div>
-            )}
-            {saveOrderMutation.error && (
-              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                {axios.isAxiosError(saveOrderMutation.error)
-                  ? ((saveOrderMutation.error.response?.data as { message?: string } | undefined)?.message ??
-                    saveOrderMutation.error.message)
-                  : "Could not save order right now."}
-              </p>
-            )}
+            </div>
           </div>
         ) : (
           <p>Files in this folder</p>
@@ -290,81 +327,28 @@ export default function FolderPage() {
       </div>
 
       <ul className="ui-card space-y-2 p-3">
-        {orderedFiles.map((file, index) => (
-          <li
-            key={file.id}
-            className={`flex items-center justify-between rounded border px-3 py-2 text-sm transition ${
-              dragOverFileId === file.id ? "border-slate-400 bg-slate-100" : "border-slate-200"
-            }`}
-            draggable={admin}
-            onDragStart={() => {
-              if (!admin) return;
-              setDraggedFileId(file.id);
-            }}
-            onDragOver={(event) => {
-              if (!admin) return;
-              event.preventDefault();
-              if (draggedFileId !== file.id) {
-                setDragOverFileId(file.id);
-              }
-            }}
-            onDrop={(event) => {
-              if (!admin) return;
-              event.preventDefault();
-              if (!draggedFileId || draggedFileId === file.id) {
-                setDragOverFileId(null);
-                return;
-              }
-              setOrderedFiles((prev) => {
-                const fromIndex = prev.findIndex((item) => item.id === draggedFileId);
-                const toIndex = prev.findIndex((item) => item.id === file.id);
-                if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
-                  return prev;
-                }
-                return moveFile(prev, fromIndex, toIndex);
-              });
-              setDragOverFileId(null);
-              setDraggedFileId(null);
-            }}
-            onDragEnd={() => {
-              setDragOverFileId(null);
-              setDraggedFileId(null);
-            }}
-          >
-            <div className="flex min-w-0 items-center gap-2">
-              {admin && <span className="text-slate-400">⋮⋮</span>}
-              <Link href={`/files/${file.id}`} className="truncate break-keep text-slate-700 hover:underline">
-                📄 {file.filename}
-              </Link>
-            </div>
-            {admin && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => moveFileByStep(index, -1)}
-                  disabled={index === 0}
-                  className="rounded px-1 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
-                  title="Move up"
-                >
-                  ↑
-                </button>
-                <button
-                  onClick={() => moveFileByStep(index, 1)}
-                  disabled={index === orderedFiles.length - 1}
-                  className="rounded px-1 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
-                  title="Move down"
-                >
-                  ↓
-                </button>
-                <button
-                  onClick={() => deleteFileMutation.mutate(file.id)}
-                  className="rounded px-1 text-rose-600 hover:bg-rose-50"
-                  title="Delete file"
-                >
-                  🗑
-                </button>
+        {visibleFiles.map((file) => (
+            <li
+              key={file.id}
+              className="flex items-center justify-between rounded border border-slate-200 px-3 py-2 text-sm transition"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <Link href={`/files/${file.id}`} className="truncate break-keep text-slate-700 hover:underline">
+                  📄 {file.filename}
+                </Link>
               </div>
-            )}
-          </li>
+              {admin && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => deleteFileMutation.mutate(file.id)}
+                    className="rounded px-1 text-rose-600 hover:bg-rose-50"
+                    title="Delete file"
+                  >
+                    🗑
+                  </button>
+                </div>
+              )}
+            </li>
         ))}
         {!orderedFiles.length && <li className="text-xs text-slate-500">No files in this folder yet.</li>}
       </ul>
@@ -372,14 +356,41 @@ export default function FolderPage() {
   );
 }
 
-function moveFile(files: FolderFile[], fromIndex: number, toIndex: number): FolderFile[] {
-  const cloned = [...files];
-  const [picked] = cloned.splice(fromIndex, 1);
-  if (!picked) {
-    return files;
+function compareVersionLikeFilename(leftFilename: string, rightFilename: string): number {
+  const leftTokens = extractLeadingNumberTokens(leftFilename);
+  const rightTokens = extractLeadingNumberTokens(rightFilename);
+  const maxLength = Math.max(leftTokens.length, rightTokens.length);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftPart = leftTokens[index];
+    const rightPart = rightTokens[index];
+
+    if (leftPart === undefined && rightPart === undefined) {
+      break;
+    }
+    if (leftPart === undefined) {
+      return -1;
+    }
+    if (rightPart === undefined) {
+      return 1;
+    }
+    if (leftPart !== rightPart) {
+      return leftPart - rightPart;
+    }
   }
-  cloned.splice(toIndex, 0, picked);
-  return cloned;
+
+  return leftFilename.localeCompare(rightFilename, "ko", { numeric: true, sensitivity: "base" });
+}
+
+function extractLeadingNumberTokens(filename: string): number[] {
+  const matched = filename.trim().match(/^\d+(?:\.\d+)*/)?.[0];
+  if (!matched) {
+    return [];
+  }
+  return matched
+    .split(".")
+    .map((part) => Number(part))
+    .filter((part) => Number.isFinite(part));
 }
 
 function FolderSearchItem({ item, keyword, returnTo }: { item: FileVersionItem; keyword: string; returnTo: string }) {
