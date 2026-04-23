@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Fragment, ReactNode } from "react";
 import { DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import ReactMarkdown from "react-markdown";
 import { useDebounce } from "use-debounce";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAdminUser } from "@/lib/auth-user";
@@ -24,6 +25,12 @@ interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
+  referencedPages?: ChatReferenceLink[];
+}
+
+interface ChatReferenceLink {
+  label: string;
+  href: string;
 }
 
 interface AssistantTypingState {
@@ -61,6 +68,8 @@ export function FolderBrowser() {
   ]);
   const [assistantTyping, setAssistantTyping] = useState<AssistantTypingState | null>(null);
   const chatViewportRef = useRef<HTMLDivElement | null>(null);
+  const requestSequenceRef = useRef(0);
+  const blockedRequestIdsRef = useRef<Set<number>>(new Set());
 
   const [debouncedGlobalSearch] = useDebounce(globalSearch, 300);
 
@@ -105,11 +114,16 @@ export function FolderBrowser() {
   });
 
   const chatMutation = useMutation({
-    mutationFn: async (message: string) => {
+    mutationFn: async ({ message, requestId }: { message: string; requestId: number }) => {
       const response = await api.post("/chatbot/chat", { message });
-      return resolveChatbotText(response.data);
+      const resolved = resolveChatbotResponse(response.data);
+      return { ...resolved, requestId };
     },
-    onSuccess: (answer) => {
+    onSuccess: ({ answer, referencedPages, requestId }) => {
+      if (blockedRequestIdsRef.current.has(requestId)) {
+        blockedRequestIdsRef.current.delete(requestId);
+        return;
+      }
       const assistantMessageId = `${Date.now()}-assistant`;
       const resolvedText = answer || "I couldn't generate a response. Please try again.";
       setChatMessages((previous) => [
@@ -118,6 +132,7 @@ export function FolderBrowser() {
           id: assistantMessageId,
           role: "assistant",
           text: "",
+          referencedPages,
         },
       ]);
       setAssistantTyping({
@@ -126,7 +141,11 @@ export function FolderBrowser() {
         cursor: 0,
       });
     },
-    onError: () => {
+    onError: (_, variables) => {
+      if (blockedRequestIdsRef.current.has(variables.requestId)) {
+        blockedRequestIdsRef.current.delete(variables.requestId);
+        return;
+      }
       setChatMessages((previous) => [
         ...previous,
         {
@@ -228,6 +247,8 @@ export function FolderBrowser() {
     if (!trimmedMessage || chatMutation.isPending || assistantTyping) {
       return;
     }
+    const requestId = requestSequenceRef.current + 1;
+    requestSequenceRef.current = requestId;
     setChatMessages((previous) => [
       ...previous,
       {
@@ -237,8 +258,17 @@ export function FolderBrowser() {
       },
     ]);
     setChatInput("");
-    chatMutation.mutate(trimmedMessage);
+    chatMutation.mutate({ message: trimmedMessage, requestId });
   };
+
+  const stopConversation = () => {
+    if (chatMutation.isPending) {
+      blockedRequestIdsRef.current.add(requestSequenceRef.current);
+    }
+    setAssistantTyping(null);
+  };
+
+  const isConversationRunning = chatMutation.isPending || Boolean(assistantTyping);
 
   const onFolderDrop = (event: DragEvent<HTMLElement>, targetFolderId: string) => {
     event.preventDefault();
@@ -417,62 +447,110 @@ export function FolderBrowser() {
       <button
         onClick={() => setIsChatOpen((previous) => !previous)}
         title={isChatOpen ? "Hide chatbot" : "Open chatbot"}
-        className="fixed bottom-5 right-5 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-xl text-white shadow-lg transition hover:scale-105 hover:bg-slate-800"
+        className="fixed bottom-5 right-5 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-[#1677ff] text-2xl text-white shadow-[0_12px_28px_rgba(22,119,255,0.45)] transition hover:scale-105 hover:bg-[#0f68e8]"
       >
         💬
       </button>
 
       {isChatOpen && (
-        <div className="fixed bottom-20 right-5 z-40 flex h-[28rem] w-[22rem] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-            <p className="text-sm font-semibold text-slate-900">Chatbot</p>
+        <div className="fixed bottom-20 right-5 z-40 flex h-[34rem] w-[23rem] flex-col overflow-hidden rounded-[2rem] border border-slate-200 bg-[#fafafc] shadow-[0_30px_80px_rgba(15,23,42,0.18)]">
+          <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3.5">
+            <div className="flex items-center gap-2.5">
+              <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-700 text-sm font-semibold text-white">
+                AI
+              </div>
+              <div className="leading-tight">
+                <p className="text-sm font-semibold text-slate-900">AI Assistant</p>
+                <p className="text-[11px] text-emerald-600">Active now</p>
+              </div>
+            </div>
             <button
               onClick={() => setIsChatOpen(false)}
               title="Close chatbot"
-              className="rounded-md px-2 py-1 text-xs text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-xs text-slate-500 transition hover:bg-slate-200 hover:text-slate-700"
             >
-              Close
+              ✕
             </button>
           </div>
-          <div ref={chatViewportRef} className="flex-1 space-y-3 overflow-y-auto bg-slate-50 px-3 py-3">
+          <div ref={chatViewportRef} className="flex-1 space-y-2.5 overflow-y-auto bg-[#f3f4f8] px-3 py-4">
             {chatMessages.map((message) => (
-              <div
-                key={message.id}
-                className={[
-                  "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm",
-                  message.role === "user"
-                    ? "ml-auto bg-slate-900 text-white"
-                    : "mr-auto border border-slate-200 bg-white text-slate-800",
-                ].join(" ")}
-              >
-                <p className="whitespace-pre-wrap break-words">
-                  {message.text}
-                  {assistantTyping?.messageId === message.id && (
-                    <span className="ml-0.5 inline-block h-4 w-1 animate-pulse rounded-sm bg-slate-400 align-middle" />
-                  )}
-                </p>
-              </div>
+              (() => {
+                const isTypingMessage = assistantTyping?.messageId === message.id;
+                return (
+                  <div
+                    key={message.id}
+                    className={[
+                      "flex",
+                      message.role === "user" ? "justify-end" : "justify-start",
+                    ].join(" ")}
+                  >
+                    <div
+                      className={[
+                        "w-fit max-w-[82%] rounded-[1.25rem] px-3.5 py-2.5 text-[13px] leading-relaxed shadow-sm",
+                        message.role === "user"
+                          ? "rounded-br-md bg-[#1980ff] text-white"
+                          : "rounded-bl-md bg-[#e5e7ef] text-slate-800",
+                      ].join(" ")}
+                    >
+                      <div className="break-words">
+                        {isTypingMessage ? (
+                          <p className="whitespace-pre-wrap break-words leading-relaxed">
+                            {message.text}
+                            <span className="ml-0.5 inline-block h-4 w-1 animate-pulse rounded-sm bg-slate-400 align-middle" />
+                          </p>
+                        ) : (
+                          renderMessageText(message.text, message.role)
+                        )}
+                        {message.role === "assistant" && message.referencedPages && message.referencedPages.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                            {message.referencedPages.map((reference) => (
+                              <Link
+                                key={`${message.id}-${reference.href}-${reference.label}`}
+                                href={reference.href}
+                                className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-slate-700 underline underline-offset-2 hover:bg-slate-100"
+                              >
+                                {reference.label}
+                              </Link>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()
             ))}
             {chatMutation.isPending && (
-              <div className="mr-auto max-w-[85%] rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
-                <LoadingBlinkDot />
+              <div className="flex justify-start">
+                <div className="w-fit max-w-[82%] rounded-[1.25rem] rounded-bl-md bg-[#e5e7ef] px-3.5 py-2.5 shadow-sm">
+                  <LoadingBlinkDot />
+                </div>
               </div>
             )}
           </div>
           <form onSubmit={submitChatMessage} className="border-t border-slate-200 bg-white p-3">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-1.5">
+              <button
+                type="button"
+                aria-label="Add attachment"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg text-slate-600 shadow-sm"
+              >
+                +
+              </button>
               <input
                 value={chatInput}
                 onChange={(event) => setChatInput(event.target.value)}
-                placeholder="Type your message..."
-                className="ui-input h-10 flex-1 text-sm"
+                placeholder="iMessage"
+                className="h-9 flex-1 border-0 bg-transparent px-2 text-sm text-slate-800 outline-none placeholder:text-slate-500"
               />
               <button
-                type="submit"
-                disabled={!chatInput.trim() || chatMutation.isPending || Boolean(assistantTyping)}
-                className="inline-flex h-10 items-center justify-center rounded-full bg-slate-900 px-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                type={isConversationRunning ? "button" : "submit"}
+                onClick={isConversationRunning ? stopConversation : undefined}
+                disabled={!isConversationRunning && !chatInput.trim()}
+                title={isConversationRunning ? "Stop conversation" : "Send message"}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#1980ff] text-sm font-semibold text-white transition hover:bg-[#0f68e8] disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
               >
-                Send
+                {isConversationRunning ? "■" : "↑"}
               </button>
             </div>
           </form>
@@ -621,38 +699,177 @@ function normalizePreviewText(content: string): string {
     .trim();
 }
 
-function resolveChatbotText(payload: unknown): string {
+function resolveChatbotResponse(payload: unknown): { answer: string; referencedPages: ChatReferenceLink[] } {
   if (typeof payload === "string") {
-    return payload;
+    return { answer: payload, referencedPages: [] };
   }
   if (!payload || typeof payload !== "object") {
-    return "";
+    return { answer: "", referencedPages: [] };
   }
 
   const recordPayload = payload as Record<string, unknown>;
+  const directAnswer = recordPayload.answer;
   const directMessage = recordPayload.message;
-  if (typeof directMessage === "string") {
-    return directMessage;
-  }
+  const directResponse = recordPayload.response;
+  const answer =
+    (typeof directAnswer === "string" && directAnswer) ||
+    (typeof directMessage === "string" && directMessage) ||
+    (typeof directResponse === "string" && directResponse) ||
+    "";
 
-  const responseMessage = recordPayload.response;
-  if (typeof responseMessage === "string") {
-    return responseMessage;
+  const directReferencedPages = normalizeReferencedPages(recordPayload.referencedPages);
+  if (directReferencedPages.length > 0) {
+    return { answer, referencedPages: directReferencedPages };
   }
 
   const data = recordPayload.data;
   if (data && typeof data === "object") {
-    const nestedMessage = (data as Record<string, unknown>).message;
-    if (typeof nestedMessage === "string") {
-      return nestedMessage;
-    }
-    const nestedResponse = (data as Record<string, unknown>).response;
-    if (typeof nestedResponse === "string") {
-      return nestedResponse;
-    }
+    const nestedData = data as Record<string, unknown>;
+    const nestedAnswer =
+      (typeof nestedData.answer === "string" && nestedData.answer) ||
+      (typeof nestedData.message === "string" && nestedData.message) ||
+      (typeof nestedData.response === "string" && nestedData.response) ||
+      answer;
+    const nestedReferencedPages = normalizeReferencedPages(nestedData.referencedPages);
+    return { answer: nestedAnswer, referencedPages: nestedReferencedPages };
   }
 
-  return "";
+  return { answer, referencedPages: [] };
+}
+
+function normalizeReferencedPages(value: unknown): ChatReferenceLink[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry, index) => toReferenceLink(entry, index))
+    .filter((entry): entry is ChatReferenceLink => entry !== null);
+}
+
+function toReferenceLink(entry: unknown, index: number): ChatReferenceLink | null {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  const record = entry as Record<string, unknown>;
+  const hrefCandidate = record.href ?? record.url ?? record.link;
+  if (typeof hrefCandidate === "string" && hrefCandidate.trim()) {
+    return {
+      href: hrefCandidate,
+      label: typeof record.label === "string" && record.label.trim() ? record.label : `Reference ${index + 1}`,
+    };
+  }
+
+  const fileIdCandidate = record.fileId ?? record.file_id ?? record.id;
+  if (typeof fileIdCandidate !== "string" || !fileIdCandidate.trim()) {
+    return null;
+  }
+
+  const pageCandidate = record.page ?? record.pageNumber;
+  const pageNumber =
+    typeof pageCandidate === "number" && Number.isFinite(pageCandidate)
+      ? pageCandidate
+      : typeof pageCandidate === "string" && pageCandidate.trim() && Number.isFinite(Number(pageCandidate))
+        ? Number(pageCandidate)
+        : null;
+
+  const params = new URLSearchParams();
+  if (pageNumber && pageNumber > 0) {
+    params.set("page", String(pageNumber));
+  }
+  const href = params.toString() ? `/files/${fileIdCandidate}?${params.toString()}` : `/files/${fileIdCandidate}`;
+  const filename = typeof record.filename === "string" ? record.filename.trim() : "";
+  const label =
+    typeof record.label === "string" && record.label.trim()
+      ? record.label
+      : filename
+        ? pageNumber
+          ? `${filename} - Page ${pageNumber}`
+          : filename
+        : pageNumber
+          ? `Page ${pageNumber}`
+          : `Reference ${index + 1}`;
+
+  return { href, label };
+}
+
+function renderMessageText(text: string, role: ChatMessage["role"]): ReactNode {
+  const isUser = role === "user";
+  const inlineCodeClass = isUser
+    ? "rounded bg-blue-500/70 px-1 py-0.5 font-mono text-[12px] text-white"
+    : "rounded bg-slate-200 px-1 py-0.5 font-mono text-[12px] text-slate-800";
+  return (
+    <ReactMarkdown
+      components={{
+        h1: ({ children }) => <h1 className="mb-2 text-lg font-bold leading-snug last:mb-0">{children}</h1>,
+        h2: ({ children }) => <h2 className="mb-2 text-base font-bold leading-snug last:mb-0">{children}</h2>,
+        h3: ({ children }) => <h3 className="mb-2 text-sm font-semibold leading-snug last:mb-0">{children}</h3>,
+        p: ({ children }) => <p className="mb-2 whitespace-pre-wrap break-words leading-relaxed last:mb-0">{children}</p>,
+        ul: ({ children }) => <ul className="mb-2 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>,
+        ol: ({ children }) => <ol className="mb-2 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>,
+        li: ({ children }) => <li>{children}</li>,
+        strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+        code: ({ children, className }) => {
+          const codeText = String(children).replace(/\n$/, "");
+          const isBlockCode = Boolean(className) || codeText.includes("\n");
+          if (isBlockCode) {
+            return <ChatCodeBlock codeText={codeText} role={role} />;
+          }
+          return <code className={inlineCodeClass}>{children}</code>;
+        },
+        pre: ({ children }) => <>{children}</>,
+      }}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+}
+
+function ChatCodeBlock({ codeText, role }: { codeText: string; role: ChatMessage["role"] }) {
+  const [copied, setCopied] = useState(false);
+  const isUser = role === "user";
+
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+    const timer = window.setTimeout(() => setCopied(false), 1200);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(codeText);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <div
+      className={[
+        "mb-2 rounded-lg border p-2.5 font-mono text-[12px] leading-relaxed last:mb-0",
+        isUser ? "border-blue-300/40 bg-blue-500/55 text-white" : "border-slate-300 bg-white/75 text-slate-800",
+      ].join(" ")}
+    >
+      <div className="mb-2 flex justify-end">
+        <button
+          type="button"
+          onClick={() => void onCopy()}
+          className={[
+            "rounded-md px-2 py-1 text-[11px] font-semibold transition",
+            copied ? "bg-emerald-600 text-white" : "bg-black text-white hover:bg-slate-800",
+          ].join(" ")}
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <pre className="overflow-x-auto">
+        <code>{codeText}</code>
+      </pre>
+    </div>
+  );
 }
 
 function LoadingBlinkDot() {
@@ -669,7 +886,7 @@ function LoadingBlinkDot() {
     <div className="flex items-center py-1">
       <span
         className={[
-          "h-2.5 w-2.5 rounded-full bg-slate-400 transition-opacity duration-200",
+          "h-2.5 w-2.5 rounded-full bg-slate-500 transition-opacity duration-200",
           isVisible ? "opacity-100" : "opacity-15",
         ].join(" ")}
       />
