@@ -37,6 +37,7 @@ interface AssistantTypingState {
   messageId: string;
   fullText: string;
   cursor: number;
+  referencedPages: ChatReferenceLink[];
 }
 
 const PAGE_CHUNK_SIZE = 5;
@@ -126,19 +127,11 @@ export function FolderBrowser() {
       }
       const assistantMessageId = `${Date.now()}-assistant`;
       const resolvedText = answer || "I couldn't generate a response. Please try again.";
-      setChatMessages((previous) => [
-        ...previous,
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          text: "",
-          referencedPages,
-        },
-      ]);
       setAssistantTyping({
         messageId: assistantMessageId,
         fullText: resolvedText,
         cursor: 0,
+        referencedPages,
       });
     },
     onError: (_, variables) => {
@@ -221,16 +214,29 @@ export function FolderBrowser() {
 
     const timer = window.setTimeout(() => {
       const nextCursor = assistantTyping.cursor + 1;
-      setChatMessages((previous) =>
-        previous.map((message) =>
+      const nextText = assistantTyping.fullText.slice(0, nextCursor);
+      setChatMessages((previous) => {
+        const messageIndex = previous.findIndex((message) => message.id === assistantTyping.messageId);
+        if (messageIndex < 0) {
+          return [
+            ...previous,
+            {
+              id: assistantTyping.messageId,
+              role: "assistant",
+              text: nextText,
+              referencedPages: assistantTyping.referencedPages,
+            },
+          ];
+        }
+        return previous.map((message) =>
           message.id === assistantTyping.messageId
             ? {
                 ...message,
-                text: assistantTyping.fullText.slice(0, nextCursor),
+                text: nextText,
               }
             : message
-        )
-      );
+        );
+      });
       setAssistantTyping((previous) =>
         previous && previous.messageId === assistantTyping.messageId
           ? { ...previous, cursor: nextCursor }
@@ -494,10 +500,7 @@ export function FolderBrowser() {
                     >
                       <div className="break-words">
                         {isTypingMessage ? (
-                          <p className="whitespace-pre-wrap break-words leading-relaxed">
-                            {message.text}
-                            <span className="ml-0.5 inline-block h-4 w-1 animate-pulse rounded-sm bg-slate-400 align-middle" />
-                          </p>
+                          <p className="whitespace-pre-wrap break-words leading-relaxed">{message.text}</p>
                         ) : (
                           renderMessageText(message.text, message.role)
                         )}
@@ -521,10 +524,8 @@ export function FolderBrowser() {
               })()
             ))}
             {chatMutation.isPending && (
-              <div className="flex justify-start">
-                <div className="w-fit max-w-[82%] rounded-[1.25rem] rounded-bl-md bg-[#e5e7ef] px-3.5 py-2.5 shadow-sm">
-                  <LoadingBlinkDot />
-                </div>
+              <div className="flex justify-start pl-2">
+                <LoadingBlinkDot />
               </div>
             )}
           </div>
