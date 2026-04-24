@@ -12,6 +12,7 @@ export function AdminPanel() {
   const [password, setPassword] = useState("");
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [folderName, setFolderName] = useState("");
+  const [createFolderLock, setCreateFolderLock] = useState(false);
   const [uploadFolderId, setUploadFolderId] = useState("");
   const [filesToUpload, setFilesToUpload] = useState<FileList | null>(null);
 
@@ -41,9 +42,10 @@ export function AdminPanel() {
   });
 
   const createFolderMutation = useMutation({
-    mutationFn: async () => api.post("/folders", { foldername: folderName }),
+    mutationFn: async () => api.post("/folders", { foldername: folderName, lock: createFolderLock }),
     onSuccess: () => {
       setFolderName("");
+      setCreateFolderLock(false);
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     },
   });
@@ -158,6 +160,15 @@ export function AdminPanel() {
         <h3 className="text-base font-semibold">Folder & File Management</h3>
         <div className="space-y-2">
           <input className="w-full rounded border p-2 text-sm" placeholder="Folder name" value={folderName} onChange={(e) => setFolderName(e.target.value)} />
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-300"
+              checked={createFolderLock}
+              onChange={(e) => setCreateFolderLock(e.target.checked)}
+            />
+            <span>Lock folder (restrict changes until unlocked)</span>
+          </label>
           <button
             onClick={() => createFolderMutation.mutate()}
             className="rounded bg-blue-600 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
@@ -179,6 +190,7 @@ export function AdminPanel() {
             {foldersQuery.data?.map((folder) => (
               <option key={folder.id} value={folder.id}>
                 {folder.foldername}
+                {folder.lock ? " (locked)" : ""}
               </option>
             ))}
           </select>

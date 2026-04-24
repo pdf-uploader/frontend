@@ -162,11 +162,13 @@ export default function FolderPage() {
     return <p className="text-sm text-red-600">Folder not found or unavailable.</p>;
   }
 
+  const folderLocked = folder.lock === true;
+
   const onDropped = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     setDragging(false);
     setDragCounter(0);
-    if (!admin) return;
+    if (!admin || folderLocked) return;
     const files = Array.from(event.dataTransfer.files).filter((file) => file.type === "application/pdf");
     if (files.length) {
       uploadMutation.mutate(files);
@@ -174,7 +176,7 @@ export default function FolderPage() {
   };
 
   const onFilePick = (event: ChangeEvent<HTMLInputElement>) => {
-    if (!admin) return;
+    if (!admin || folderLocked) return;
     const files = Array.from(event.target.files ?? []);
     if (files.length) {
       uploadMutation.mutate(files);
@@ -195,17 +197,17 @@ export default function FolderPage() {
     <section
       className={`ui-shell space-y-5 ${dragging ? "rounded-2xl ring-2 ring-slate-300 ring-offset-2" : ""}`}
       onDragOver={(event) => {
-        if (!admin) return;
+        if (!admin || folderLocked) return;
         event.preventDefault();
       }}
       onDragEnter={(event) => {
-        if (!admin) return;
+        if (!admin || folderLocked) return;
         event.preventDefault();
         setDragCounter((prev) => prev + 1);
         setDragging(true);
       }}
       onDragLeave={(event) => {
-        if (!admin) return;
+        if (!admin || folderLocked) return;
         event.preventDefault();
         setDragCounter((prev) => {
           const next = Math.max(0, prev - 1);
@@ -216,11 +218,11 @@ export default function FolderPage() {
         });
       }}
       onDrop={(event) => {
-        if (!admin) return;
+        if (!admin || folderLocked) return;
         onDropped(event);
       }}
     >
-      {admin && dragging && (
+      {admin && !folderLocked && dragging && (
         <div className="sticky top-20 z-10 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm">
           Drop files anywhere on this page to upload to this folder.
         </div>
@@ -230,7 +232,22 @@ export default function FolderPage() {
         <Link href="/" className="ui-btn-back w-fit">
           Back to library
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">📁 {folder.foldername}</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {folderLocked ? "🔒" : "📁"} {folder.foldername}
+          </h1>
+          {folderLocked && (
+            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium uppercase text-amber-800">
+              Locked
+            </span>
+          )}
+        </div>
+        {folderLocked && (
+          <p className="max-w-2xl text-sm text-slate-600">
+            This folder is locked. Uploads and file deletion are disabled until an admin unlocks it from the library
+            home.
+          </p>
+        )}
       </div>
 
       <div className="ui-card p-4">
@@ -262,11 +279,16 @@ export default function FolderPage() {
         {admin ? (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <p>Drop PDF files anywhere on this page or use + to upload multiple files</p>
+              <p className={folderLocked ? "text-slate-500" : undefined}>
+                {folderLocked
+                  ? "Unlock this folder on the library home to add or remove files."
+                  : "Drop PDF files anywhere on this page or use + to upload multiple files"}
+              </p>
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="ui-btn-primary h-8 w-8 p-0 text-base"
-                title="Upload files"
+                title={folderLocked ? "Folder is locked" : "Upload files"}
+                disabled={folderLocked}
               >
                 +
               </button>
@@ -277,6 +299,7 @@ export default function FolderPage() {
                 multiple
                 className="hidden"
                 onChange={onFilePick}
+                disabled={folderLocked}
               />
             </div>
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
@@ -341,8 +364,9 @@ export default function FolderPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => deleteFileMutation.mutate(file.id)}
-                    className="rounded px-1 text-rose-600 hover:bg-rose-50"
-                    title="Delete file"
+                    className="rounded px-1 text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    title={folderLocked ? "Folder is locked" : "Delete file"}
+                    disabled={folderLocked}
                   >
                     🗑
                   </button>

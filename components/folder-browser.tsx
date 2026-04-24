@@ -58,9 +58,11 @@ export function FolderBrowser() {
   const urlKeyword = searchParams.get("keyword") ?? "";
   const [globalSearch, setGlobalSearch] = useState(urlKeyword);
   const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderLock, setNewFolderLock] = useState(false);
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [folderNameDraft, setFolderNameDraft] = useState("");
+  const [folderLockDraft, setFolderLockDraft] = useState(false);
   const [orderedFolders, setOrderedFolders] = useState<Folder[]>([]);
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
@@ -104,19 +106,29 @@ export function FolderBrowser() {
   });
 
   const createFolderMutation = useMutation({
-    mutationFn: async (foldername: string) => api.post("/folders", { foldername }),
+    mutationFn: async ({ foldername, lock }: { foldername: string; lock: boolean }) =>
+      api.post("/folders", { foldername, lock }),
     onSuccess: () => {
       setNewFolderName("");
+      setNewFolderLock(false);
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     },
   });
 
   const renameFolderMutation = useMutation({
-    mutationFn: async ({ folderId, foldername }: { folderId: string; foldername: string }) =>
-      api.patch(`/folders/${folderId}`, { foldername }),
+    mutationFn: async ({
+      folderId,
+      foldername,
+      lock,
+    }: {
+      folderId: string;
+      foldername: string;
+      lock: boolean;
+    }) => api.patch(`/folders/${folderId}`, { foldername, lock }),
     onSuccess: () => {
       setEditingFolderId(null);
       setFolderNameDraft("");
+      setFolderLockDraft(false);
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["folder"] });
     },
@@ -127,6 +139,7 @@ export function FolderBrowser() {
     onSuccess: () => {
       setEditingFolderId(null);
       setFolderNameDraft("");
+      setFolderLockDraft(false);
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     },
   });
@@ -376,21 +389,39 @@ export function FolderBrowser() {
         </div>
 
         {admin && showCreateFolder && (
-          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-            <input
-              id="newFolder"
-              value={newFolderName}
-              onChange={(event) => setNewFolderName(event.target.value)}
-              className="ui-input w-full max-w-sm"
-              placeholder="Folder name"
-            />
-            <button
-              onClick={() => createFolderMutation.mutate(newFolderName)}
-              disabled={!newFolderName.trim() || createFolderMutation.isPending}
-              className="ui-btn-primary"
-            >
-              {createFolderMutation.isPending ? "Creating..." : "Create"}
-            </button>
+          <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                id="newFolder"
+                value={newFolderName}
+                onChange={(event) => setNewFolderName(event.target.value)}
+                className="ui-input w-full max-w-sm"
+                placeholder="Folder name"
+              />
+              <button
+                onClick={() =>
+                  createFolderMutation.mutate({ foldername: newFolderName.trim(), lock: newFolderLock })
+                }
+                disabled={!newFolderName.trim() || createFolderMutation.isPending}
+                className="ui-btn-primary"
+              >
+                {createFolderMutation.isPending ? "Creating..." : "Create"}
+              </button>
+            </div>
+            <label className="flex max-w-md cursor-pointer items-start gap-2.5 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                checked={newFolderLock}
+                onChange={(event) => setNewFolderLock(event.target.checked)}
+              />
+              <span>
+                <span className="font-medium text-slate-800">Locked</span>
+                <span className="mt-0.5 block text-xs text-slate-500">
+                  When locked, the folder is marked as protected in the app. You can change this when editing the folder.
+                </span>
+              </span>
+            </label>
           </div>
         )}
 
@@ -440,18 +471,27 @@ export function FolderBrowser() {
             ].join(" ")}
           >
             <div className="mb-2 flex items-start justify-between gap-2">
-              <div className="flex items-center gap-2">
-                {admin && <span className="text-sm text-slate-400">⋮⋮</span>}
-                <span className="text-xl">📁</span>
-                <span className="text-sm font-semibold text-slate-900">{folder.foldername}</span>
+              <div className="flex min-w-0 items-center gap-2">
+                {admin && <span className="shrink-0 text-sm text-slate-400">⋮⋮</span>}
+                <span className="shrink-0 text-xl">{folder.lock ? "🔒" : "📁"}</span>
+                <span className="min-w-0 truncate text-sm font-semibold text-slate-900">{folder.foldername}</span>
+                {folder.lock && (
+                  <span
+                    className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800"
+                    title="Locked"
+                  >
+                    Locked
+                  </span>
+                )}
               </div>
               {admin && (
-                <div className="flex items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1">
                   <button
                     onClick={(event) => {
                       event.preventDefault();
                       setEditingFolderId((prev) => (prev === folder.id ? null : folder.id));
                       setFolderNameDraft(folder.foldername);
+                      setFolderLockDraft(!!folder.lock);
                     }}
                     className="rounded p-1 text-slate-500 hover:bg-slate-100"
                     title="Edit folder"
@@ -475,14 +515,28 @@ export function FolderBrowser() {
                   className="ui-input"
                   placeholder="Rename folder"
                 />
+                <label className="flex cursor-pointer items-start gap-2 text-xs text-slate-600">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                    checked={folderLockDraft}
+                    onChange={(event) => setFolderLockDraft(event.target.checked)}
+                  />
+                  <span>Lock folder (protected)</span>
+                </label>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() =>
-                      renameFolderMutation.mutate({ folderId: folder.id, foldername: folderNameDraft })
+                      renameFolderMutation.mutate({
+                        folderId: folder.id,
+                        foldername: folderNameDraft.trim() || folder.foldername,
+                        lock: folderLockDraft,
+                      })
                     }
                     className="ui-btn-primary px-3 py-1.5 text-xs"
+                    disabled={!folderNameDraft.trim() || renameFolderMutation.isPending}
                   >
-                    Save
+                    {renameFolderMutation.isPending ? "Saving…" : "Save"}
                   </button>
                   <button
                     onClick={() => deleteFolderMutation.mutate(folder.id)}
