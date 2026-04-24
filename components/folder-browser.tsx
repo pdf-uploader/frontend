@@ -33,6 +33,11 @@ interface ChatReferenceLink {
   href: string;
 }
 
+interface ChatModelOption {
+  id: string;
+  label: string;
+}
+
 interface AssistantTypingState {
   messageId: string;
   fullText: string;
@@ -60,6 +65,7 @@ export function FolderBrowser() {
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
+  const [selectedModelId, setSelectedModelId] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
       id: "assistant-greeting",
@@ -84,6 +90,16 @@ export function FolderBrowser() {
     queryFn: async () =>
       (await api.get<GlobalFindItem[]>("/files/find", { params: { keyword: debouncedGlobalSearch } })).data,
     enabled: debouncedGlobalSearch.trim().length > 0,
+  });
+
+  const chatModelsQuery = useQuery({
+    queryKey: ["chatbot", "chat", "models"],
+    queryFn: async () => {
+      const { data } = await api.get<unknown>("/chatbot/chat/models");
+      return normalizeChatModels(data);
+    },
+    enabled: isChatOpen,
+    staleTime: 60_000,
   });
 
   const createFolderMutation = useMutation({
@@ -115,8 +131,17 @@ export function FolderBrowser() {
   });
 
   const chatMutation = useMutation({
-    mutationFn: async ({ message, requestId }: { message: string; requestId: number }) => {
-      const response = await api.post("/chatbot/chat", { message });
+    mutationFn: async ({
+      message,
+      requestId,
+      model,
+    }: {
+      message: string;
+      requestId: number;
+      model: string;
+    }) => {
+      const body = model ? { model, message } : { message };
+      const response = await api.post("/chatbot/chat", body);
       const resolved = resolveChatbotResponse(response.data);
       return { ...resolved, requestId };
     },
@@ -171,6 +196,20 @@ export function FolderBrowser() {
   useEffect(() => {
     setOrderedFolders(foldersQuery.data ?? []);
   }, [serverFolderOrderSignature, foldersQuery.data]);
+
+  useEffect(() => {
+    const models = chatModelsQuery.data;
+    if (!models?.length) {
+      setSelectedModelId("");
+      return;
+    }
+    setSelectedModelId((current) => {
+      if (current && models.some((m) => m.id === current)) {
+        return current;
+      }
+      return models[0]?.id ?? "";
+    });
+  }, [chatModelsQuery.data]);
 
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -250,7 +289,14 @@ export function FolderBrowser() {
   const submitChatMessage = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedMessage = chatInput.trim();
-    if (!trimmedMessage || chatMutation.isPending || assistantTyping) {
+    const models = chatModelsQuery.data ?? [];
+    const modelRequired = models.length > 0;
+    if (
+      !trimmedMessage ||
+      chatMutation.isPending ||
+      assistantTyping ||
+      (modelRequired && !selectedModelId)
+    ) {
       return;
     }
     const requestId = requestSequenceRef.current + 1;
@@ -264,7 +310,7 @@ export function FolderBrowser() {
       },
     ]);
     setChatInput("");
-    chatMutation.mutate({ message: trimmedMessage, requestId });
+    chatMutation.mutate({ message: trimmedMessage, requestId, model: selectedModelId });
   };
 
   const stopConversation = () => {
@@ -530,6 +576,29 @@ export function FolderBrowser() {
             )}
           </div>
           <form onSubmit={submitChatMessage} className="border-t border-slate-200 bg-white p-3">
+            <div className="mb-2 flex flex-col gap-1">
+              <label htmlFor="chat-model" className="text-[11px] font-medium text-slate-500">
+                Model
+              </label>
+              <select
+                id="chat-model"
+                value={selectedModelId}
+                onChange={(event) => setSelectedModelId(event.target.value)}
+                disabled={chatModelsQuery.isLoading || chatMutation.isPending || Boolean(assistantTyping)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 outline-none focus:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {chatModelsQuery.isLoading && <option value="">Loading models…</option>}
+                {chatModelsQuery.isError && <option value="">Could not load models</option>}
+                {!chatModelsQuery.isLoading &&
+                  !chatModelsQuery.isError &&
+                  (chatModelsQuery.data?.length ?? 0) === 0 && <option value="">No models available</option>}
+                {chatModelsQuery.data?.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-1.5">
               <button
                 type="button"
@@ -547,7 +616,11 @@ export function FolderBrowser() {
               <button
                 type={isConversationRunning ? "button" : "submit"}
                 onClick={isConversationRunning ? stopConversation : undefined}
-                disabled={!isConversationRunning && !chatInput.trim()}
+                disabled={
+                  !isConversationRunning &&
+                  (!chatInput.trim() ||
+                    ((chatModelsQuery.data?.length ?? 0) > 0 && !selectedModelId))
+                }
                 title={isConversationRunning ? "Stop conversation" : "Send message"}
                 className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#1980ff] text-sm font-semibold text-white transition hover:bg-[#0f68e8] disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
               >
@@ -698,6 +771,52 @@ function normalizePreviewText(content: string): string {
     .replace(/([^\x00-\x7F])([A-Za-z0-9])/g, "$1 $2")
     .replace(/([,.;:!?])(?=\S)/g, "$1 ")
     .trim();
+}
+
+function normalizeChatModels(payload: unknown): ChatModelOption[] {
+  if (Array.isArray(payload)) {
+    return payload.map((entry, index) => chatModelFromUnknown(entry, index)).filter(Boolean) as ChatModelOption[];
+  }
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+  const record = payload as Record<string, unknown>;
+  const nested =
+    record.models ??
+    record.data ??
+    record.items ??
+    record.results ??
+    record.modelList;
+  if (Array.isArray(nested)) {
+    return nested.map((entry, index) => chatModelFromUnknown(entry, index)).filter(Boolean) as ChatModelOption[];
+  }
+  return [];
+}
+
+function chatModelFromUnknown(entry: unknown, index: number): ChatModelOption | null {
+  if (typeof entry === "string" && entry.trim()) {
+    const id = entry.trim();
+    return { id, label: id };
+  }
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const o = entry as Record<string, unknown>;
+  const id =
+    (typeof o.id === "string" && o.id.trim()) ||
+    (typeof o.model === "string" && o.model.trim()) ||
+    (typeof o.name === "string" && o.name.trim()) ||
+    (typeof o.value === "string" && o.value.trim()) ||
+    "";
+  if (!id) {
+    return null;
+  }
+  const labelRaw =
+    (typeof o.label === "string" && o.label.trim()) ||
+    (typeof o.title === "string" && o.title.trim()) ||
+    (typeof o.displayName === "string" && o.displayName.trim()) ||
+    id;
+  return { id, label: labelRaw };
 }
 
 function resolveChatbotResponse(payload: unknown): { answer: string; referencedPages: ChatReferenceLink[] } {
