@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { isAdminUser } from "@/lib/auth-user";
 import { api } from "@/lib/api";
+import { rehypeAppendStreamCursor } from "@/lib/rehype-append-stream-cursor";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { Folder } from "@/lib/types";
 
@@ -408,10 +409,10 @@ export function FolderBrowser() {
                 {createFolderMutation.isPending ? "Creating..." : "Create"}
               </button>
             </div>
-            <label className="flex max-w-md cursor-pointer items-start gap-2.5 text-sm text-slate-600">
+            <label className="flex max-w-md cursor-pointer select-none items-start gap-2.5 text-sm text-slate-600">
               <input
                 type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                className="folder-lock-checkbox mt-0.5 h-[1.125rem] w-[1.125rem] shrink-0"
                 checked={newFolderLock}
                 onChange={(event) => setNewFolderLock(event.target.checked)}
               />
@@ -444,111 +445,130 @@ export function FolderBrowser() {
       {foldersQuery.isLoading && <p className="text-sm text-slate-600">Loading folders...</p>}
       {foldersQuery.error && <p className="text-sm text-red-600">Could not load folders.</p>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {orderedFolders.map((folder, index) => (
-          <Link
-            key={folder.id}
-            href={`/folders/${folder.id}`}
-            draggable={admin}
-            onDragStart={() => {
+        {orderedFolders.map((folder) => {
+          const isEditing = admin && editingFolderId === folder.id;
+          const cardClass = [
+            "block rounded-2xl border bg-white/95 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md",
+            dragOverFolderId === folder.id ? "border-slate-400 bg-slate-100" : "border-slate-200/90",
+          ].join(" ");
+
+          const cardBody = (
+            <>
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  {admin && <span className="shrink-0 text-sm text-slate-400">⋮⋮</span>}
+                  <span className="shrink-0 text-xl">{folder.lock ? "🔒" : "📁"}</span>
+                  <span className="min-w-0 truncate text-sm font-semibold text-slate-900">{folder.foldername}</span>
+                  {folder.lock && (
+                    <span
+                      className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800"
+                      title="Locked"
+                    >
+                      Locked
+                    </span>
+                  )}
+                </div>
+                {admin && (
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setEditingFolderId((prev) => (prev === folder.id ? null : folder.id));
+                        setFolderNameDraft(folder.foldername);
+                        setFolderLockDraft(!!folder.lock);
+                      }}
+                      className="rounded p-1 text-slate-500 hover:bg-slate-100"
+                      title="Edit folder"
+                    >
+                      ✏️
+                    </button>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-slate-500">
+                {folder.files.length} file{folder.files.length === 1 ? "" : "s"}
+              </p>
+              {isEditing && (
+                <div className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5">
+                  <input
+                    value={folderNameDraft}
+                    onChange={(event) => setFolderNameDraft(event.target.value)}
+                    className="ui-input"
+                    placeholder="Rename folder"
+                  />
+                  <label className="flex cursor-pointer select-none items-start gap-2.5 text-xs text-slate-600">
+                    <input
+                      type="checkbox"
+                      className="folder-lock-checkbox mt-0.5 h-[1.125rem] w-[1.125rem] shrink-0 cursor-pointer"
+                      checked={folderLockDraft}
+                      onChange={(event) => setFolderLockDraft(event.target.checked)}
+                    />
+                    <span>Lock folder (protected)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        renameFolderMutation.mutate({
+                          folderId: folder.id,
+                          foldername: folderNameDraft.trim() || folder.foldername,
+                          lock: folderLockDraft,
+                        })
+                      }
+                      className="ui-btn-primary px-3 py-1.5 text-xs"
+                      disabled={!folderNameDraft.trim() || renameFolderMutation.isPending}
+                    >
+                      {renameFolderMutation.isPending ? "Saving…" : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteFolderMutation.mutate(folder.id)}
+                      className="inline-flex items-center justify-center rounded-full bg-rose-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-rose-500"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          );
+
+          const dragProps = {
+            draggable: admin,
+            onDragStart: () => {
               if (!admin) return;
               setDraggedFolderId(folder.id);
-            }}
-            onDragOver={(event) => {
+            },
+            onDragOver: (event: DragEvent<HTMLElement>) => {
               if (!admin) return;
               event.preventDefault();
               if (draggedFolderId !== folder.id) {
                 setDragOverFolderId(folder.id);
               }
-            }}
-            onDrop={(event) => onFolderDrop(event, folder.id)}
-            onDragEnd={() => {
+            },
+            onDrop: (event: DragEvent<HTMLElement>) => onFolderDrop(event, folder.id),
+            onDragEnd: () => {
               setDragOverFolderId(null);
               setDraggedFolderId(null);
-            }}
-            className={[
-              "block rounded-2xl border bg-white/95 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md",
-              dragOverFolderId === folder.id ? "border-slate-400 bg-slate-100" : "border-slate-200/90",
-            ].join(" ")}
-          >
-            <div className="mb-2 flex items-start justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
-                {admin && <span className="shrink-0 text-sm text-slate-400">⋮⋮</span>}
-                <span className="shrink-0 text-xl">{folder.lock ? "🔒" : "📁"}</span>
-                <span className="min-w-0 truncate text-sm font-semibold text-slate-900">{folder.foldername}</span>
-                {folder.lock && (
-                  <span
-                    className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800"
-                    title="Locked"
-                  >
-                    Locked
-                  </span>
-                )}
+            },
+          };
+
+          if (isEditing) {
+            return (
+              <div key={folder.id} className={cardClass} {...dragProps}>
+                {cardBody}
               </div>
-              {admin && (
-                <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    onClick={(event) => {
-                      event.preventDefault();
-                      setEditingFolderId((prev) => (prev === folder.id ? null : folder.id));
-                      setFolderNameDraft(folder.foldername);
-                      setFolderLockDraft(!!folder.lock);
-                    }}
-                    className="rounded p-1 text-slate-500 hover:bg-slate-100"
-                    title="Edit folder"
-                  >
-                    ✏️
-                  </button>
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-slate-500">
-              {folder.files.length} file{folder.files.length === 1 ? "" : "s"}
-            </p>
-            {admin && editingFolderId === folder.id && (
-              <div
-                onClick={(event) => event.preventDefault()}
-                className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5"
-              >
-                <input
-                  value={folderNameDraft}
-                  onChange={(event) => setFolderNameDraft(event.target.value)}
-                  className="ui-input"
-                  placeholder="Rename folder"
-                />
-                <label className="flex cursor-pointer items-start gap-2 text-xs text-slate-600">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300"
-                    checked={folderLockDraft}
-                    onChange={(event) => setFolderLockDraft(event.target.checked)}
-                  />
-                  <span>Lock folder (protected)</span>
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() =>
-                      renameFolderMutation.mutate({
-                        folderId: folder.id,
-                        foldername: folderNameDraft.trim() || folder.foldername,
-                        lock: folderLockDraft,
-                      })
-                    }
-                    className="ui-btn-primary px-3 py-1.5 text-xs"
-                    disabled={!folderNameDraft.trim() || renameFolderMutation.isPending}
-                  >
-                    {renameFolderMutation.isPending ? "Saving…" : "Save"}
-                  </button>
-                  <button
-                    onClick={() => deleteFolderMutation.mutate(folder.id)}
-                    className="inline-flex items-center justify-center rounded-full bg-rose-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-rose-500"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            )}
-          </Link>
-        ))}
+            );
+          }
+
+          return (
+            <Link key={folder.id} href={`/folders/${folder.id}`} className={cardClass} {...dragProps}>
+              {cardBody}
+            </Link>
+          );
+        })}
       </div>
 
       <button
@@ -580,32 +600,36 @@ export function FolderBrowser() {
             </button>
           </div>
           <div ref={chatViewportRef} className="flex-1 space-y-2.5 overflow-y-auto bg-[#f3f4f8] px-3 py-4">
-            {chatMessages.map((message) => (
-              (() => {
-                const isTypingMessage = assistantTyping?.messageId === message.id;
-                return (
+            {chatMessages.map((message) => {
+              const isTypingMessage = assistantTyping?.messageId === message.id;
+              const isAssistant = message.role === "assistant";
+              return (
+                <div
+                  key={message.id}
+                  className={["flex", message.role === "user" ? "justify-end" : "justify-start"].join(" ")}
+                >
                   <div
-                    key={message.id}
                     className={[
-                      "flex",
-                      message.role === "user" ? "justify-end" : "justify-start",
+                      "w-fit max-w-[82%] rounded-[1.25rem] px-3.5 py-2.5 text-[13px] leading-relaxed shadow-sm",
+                      message.role === "user"
+                        ? "rounded-br-md bg-[#1980ff] text-white"
+                        : "rounded-bl-md bg-[#e5e7ef] text-slate-800",
                     ].join(" ")}
                   >
-                    <div
-                      className={[
-                        "w-fit max-w-[82%] rounded-[1.25rem] px-3.5 py-2.5 text-[13px] leading-relaxed shadow-sm",
-                        message.role === "user"
-                          ? "rounded-br-md bg-[#1980ff] text-white"
-                          : "rounded-bl-md bg-[#e5e7ef] text-slate-800",
-                      ].join(" ")}
-                    >
-                      <div className="break-words">
-                        {isTypingMessage ? (
-                          <p className="whitespace-pre-wrap break-words leading-relaxed">{message.text}</p>
-                        ) : (
-                          renderMessageText(message.text, message.role)
-                        )}
-                        {message.role === "assistant" && message.referencedPages && message.referencedPages.length > 0 && (
+                    <div className="break-words">
+                      {isAssistant && isTypingMessage && !message.text ? (
+                        <span className="chat-typing-cursor-line" aria-hidden />
+                      ) : isAssistant && isTypingMessage ? (
+                        <div className="chat-typing-md">
+                          {renderMessageText(message.text, "assistant", { streamCursor: true })}
+                        </div>
+                      ) : (
+                        renderMessageText(message.text, message.role)
+                      )}
+                      {isAssistant &&
+                        !isTypingMessage &&
+                        message.referencedPages &&
+                        message.referencedPages.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                             {message.referencedPages.map((reference) => (
                               <Link
@@ -618,12 +642,25 @@ export function FolderBrowser() {
                             ))}
                           </div>
                         )}
-                      </div>
                     </div>
+                    {message.text.trim() !== "" &&
+                      (message.role === "user" || !isTypingMessage) && (
+                        <div
+                          className={[
+                            "mt-1.5 flex",
+                            message.role === "user" ? "justify-end" : "justify-start",
+                          ].join(" ")}
+                        >
+                          <MessageCopyButton
+                            text={message.text}
+                            variant={message.role === "user" ? "user" : "assistant"}
+                          />
+                        </div>
+                      )}
                   </div>
-                );
-              })()
-            ))}
+                </div>
+              );
+            })}
             {chatMutation.isPending && (
               <div className="flex justify-start pl-2">
                 <LoadingBlinkDot />
@@ -1005,13 +1042,62 @@ function toReferenceLink(entry: unknown, index: number): ChatReferenceLink | nul
   return { href, label };
 }
 
-function renderMessageText(text: string, role: ChatMessage["role"]): ReactNode {
+function MessageCopyButton({ text, variant }: { text: string; variant: "user" | "assistant" }) {
+  const [copied, setCopied] = useState(false);
+  const isUser = variant === "user";
+  const label = copied ? "Copied" : "Copy";
+
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+    const t = window.setTimeout(() => setCopied(false), 1800);
+    return () => window.clearTimeout(t);
+  }, [copied]);
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => void onCopy()}
+      aria-label={label}
+      className={[
+        "rounded-md px-2 py-0.5 text-[10px] font-semibold transition",
+        isUser
+          ? copied
+            ? "text-emerald-200"
+            : "text-white/85 hover:text-white"
+          : copied
+            ? "text-emerald-700"
+            : "text-slate-500 hover:text-slate-800",
+      ].join(" ")}
+    >
+      {label}
+    </button>
+  );
+}
+
+function renderMessageText(
+  text: string,
+  role: ChatMessage["role"],
+  options?: { streamCursor?: boolean }
+): ReactNode {
+  const { streamCursor = false } = options ?? {};
   const isUser = role === "user";
   const inlineCodeClass = isUser
     ? "rounded bg-blue-500/70 px-1 py-0.5 font-mono text-[12px] text-white"
     : "rounded bg-slate-200 px-1 py-0.5 font-mono text-[12px] text-slate-800";
   return (
     <ReactMarkdown
+      rehypePlugins={streamCursor ? [rehypeAppendStreamCursor] : undefined}
       components={{
         h1: ({ children }) => <h1 className="mb-2 text-lg font-bold leading-snug last:mb-0">{children}</h1>,
         h2: ({ children }) => <h2 className="mb-2 text-base font-bold leading-snug last:mb-0">{children}</h2>,

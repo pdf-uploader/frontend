@@ -53,6 +53,45 @@ a {
   @apply text-inherit no-underline;
 }
 
+/* Native checkboxes: accent-color makes the checked fill and checkmark contrast obvious in all engines. */
+.folder-lock-checkbox {
+  accent-color: #0f172a; /* slate-900 */
+}
+
+@keyframes chat-cursor-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Empty assistant reply while the first character is not yet shown */
+.chat-typing-cursor-line {
+  display: inline-block;
+  width: 2px;
+  min-height: 1.1em;
+  background: #1e293b;
+  border-radius: 1px;
+  vertical-align: -0.2em;
+  animation: chat-cursor-blink 0.9s step-end infinite;
+}
+
+/* Injected as the last child of the last p/h/li/code/… in the AST (rehype), so it stays on the same line as the text. */
+.chat-stream-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: -0.2em;
+  background: #1e293b;
+  border-radius: 1px;
+  animation: chat-cursor-blink 0.9s step-end infinite;
+}
+
 @layer components {
   .ui-shell {
     @apply mx-auto w-full max-w-7xl px-4 py-7 sm:px-6 sm:py-8;
