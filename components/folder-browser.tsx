@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import { useDebounce } from "use-debounce";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import axios from "axios";
 import { isAdminUser } from "@/lib/auth-user";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/use-auth";
@@ -159,7 +160,7 @@ export function FolderBrowser() {
         referencedPages,
       });
     },
-    onError: (_, variables) => {
+    onError: (error, variables) => {
       if (blockedRequestIdsRef.current.has(variables.requestId)) {
         blockedRequestIdsRef.current.delete(variables.requestId);
         return;
@@ -169,7 +170,7 @@ export function FolderBrowser() {
         {
           id: `${Date.now()}-assistant-error`,
           role: "assistant",
-          text: "Something went wrong while contacting the chatbot. Please try again.",
+          text: getChatbotErrorMessage(error),
         },
       ]);
     },
@@ -817,6 +818,43 @@ function chatModelFromUnknown(entry: unknown, index: number): ChatModelOption | 
     (typeof o.displayName === "string" && o.displayName.trim()) ||
     id;
   return { id, label: labelRaw };
+}
+
+function getChatbotErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as
+      | { message?: string; error?: string; detail?: string }
+      | string
+      | undefined;
+    if (typeof data === "string" && data.trim()) {
+      return data.trim();
+    }
+    if (data && typeof data === "object") {
+      if (typeof data.message === "string" && data.message.trim()) {
+        return data.message.trim();
+      }
+      if (typeof data.error === "string" && data.error.trim()) {
+        return data.error.trim();
+      }
+      if (typeof data.detail === "string" && data.detail.trim()) {
+        return data.detail.trim();
+      }
+    }
+    const status = error.response?.status;
+    if (status) {
+      const statusText = error.response?.statusText?.trim();
+      return statusText ? `Request failed (${status} ${statusText})` : `Request failed (${status})`;
+    }
+    if (typeof error.message === "string" && error.message.trim()) {
+      return error.message.trim();
+    }
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+
+  return "Something went wrong while contacting the chatbot. Please try again.";
 }
 
 function resolveChatbotResponse(payload: unknown): { answer: string; referencedPages: ChatReferenceLink[] } {
