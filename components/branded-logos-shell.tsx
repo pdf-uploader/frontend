@@ -1,0 +1,83 @@
+import Image from "next/image";
+import Link from "next/link";
+
+const DEFAULT_HEADLINE = "UGANDA  EXPRESSWAY MANUAL MANAGEMENT";
+
+type BrandedTopLogosProps = {
+  /** When set, a Login control is shown before the KOICA logo. */
+  loginHref?: string;
+  /** Centered title in the top bar. */
+  headline?: string;
+};
+
+export function BrandedTopLogos({ loginHref, headline = DEFAULT_HEADLINE }: BrandedTopLogosProps) {
+  return (
+    <header className="relative z-20 w-full max-w-[100vw] shrink-0 border-b border-slate-200/60 bg-white">
+      <div
+        className="grid w-full items-center gap-x-2 gap-y-2 py-2.5 pl-2 pr-2 [grid-template-areas:'mowt_actions''title_title'] [grid-template-columns:1fr_auto] sm:gap-x-1.5 sm:gap-y-0 sm:py-3 sm:[grid-template-areas:'mowt_title_actions'] sm:grid-cols-[minmax(0,0.95fr)_minmax(0,2.6fr)_minmax(0,0.95fr)] sm:pl-1.5 sm:pr-1.5 md:gap-x-2 md:py-3.5 md:pl-2 md:pr-2 lg:py-4"
+      >
+        <div className="relative [grid-area:mowt] h-11 w-32 min-w-0 sm:h-14 sm:w-44 md:h-16 md:w-52">
+          <Image
+            src="/logo/MOWT.png"
+            alt="Ministry of Works and Transport"
+            fill
+            className="object-contain object-left"
+            priority
+            sizes="(max-width: 640px) 176px, 208px"
+          />
+        </div>
+        <h1 className="[grid-area:title] col-span-2 min-w-0 max-w-full whitespace-pre-wrap px-1 text-center text-balance font-extrabold uppercase leading-tight text-blue-950 sm:col-span-1 sm:px-2 sm:leading-[1.12] sm:tracking-wide md:px-3 md:leading-tight md:tracking-tighter lg:px-4 [font-size:clamp(0.9rem,3.2vw+0.3rem,1.75rem)] sm:[font-size:clamp(1.05rem,1.4vw+0.65rem,1.9rem)] md:[font-size:clamp(1.2rem,1.1vw+0.85rem,2.25rem)] lg:[font-size:clamp(1.35rem,0.9vw+1.05rem,2.6rem)] xl:[font-size:clamp(1.5rem,0.8vw+1.2rem,2.75rem)]">
+          {headline}
+        </h1>
+        <div className="[grid-area:actions] flex items-center justify-end gap-1.5 sm:min-w-0 sm:gap-2 md:gap-3">
+          {loginHref && (
+            <Link
+              href={loginHref}
+              className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-700 sm:px-5 sm:py-2.5 sm:text-sm"
+            >
+              Login
+            </Link>
+          )}
+          <div className="relative h-9 w-20 sm:h-12 sm:w-28 md:h-14 md:w-32">
+            <Image
+              src="/logo/KOICA.png"
+              alt="KOICA"
+              fill
+              className="object-contain object-right"
+              priority
+              sizes="(max-width: 640px) 112px, 128px"
+            />
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+type BrandedBottomConsultantsProps = {
+  /** on-map: bar over blurred map. default: over app page background. */
+  variant?: "on-map" | "default";
+};
+
+export function BrandedBottomConsultants({ variant = "default" }: BrandedBottomConsultantsProps) {
+  const barClassName =
+    variant === "on-map" ? "border-slate-200/60" : "border-slate-200/80";
+
+  return (
+    <footer
+      className={`relative z-10 mt-auto w-full max-w-[100vw] border-t ${barClassName} bg-white ${variant === "default" ? "shadow-sm" : ""}`}
+    >
+      <div className="w-full py-3 pl-2 pr-2 sm:py-4 sm:pl-4 sm:pr-4 md:pl-6 md:pr-6">
+        <div className="relative h-12 w-full sm:h-16 md:h-[4.5rem]">
+          <Image
+            src="/logo/consultant-companies.png"
+            alt="Consultant partner companies"
+            fill
+            className="object-contain object-left sm:object-center"
+            sizes="100vw"
+          />
+        </div>
+      </div>
+    </footer>
+  );
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { BrandedBottomConsultants } from "@/components/branded-logos-shell";
 import { FolderBrowser } from "@/components/folder-browser";
 import { HomeScrollSequence } from "@/components/home-scroll-sequence";
 import { useAuth } from "@/lib/hooks/use-auth";
@@ -18,15 +19,11 @@ export default function HomePage() {
   }
 
   return (
-    <section className="ui-shell space-y-5">
-      <div className="ui-card-soft p-5 sm:p-6">
-        <p className="mb-2 inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
-          Workspace
-        </p>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">File Management</h1>
-        <p className="mt-2 text-sm text-slate-600">Browse folders, search files, and open manuals quickly.</p>
+    <div className="flex min-h-[calc(100dvh-5.5rem)] w-full flex-col">
+      <div className="ui-shell flex w-full flex-1 flex-col py-5 sm:py-6">
+        <FolderBrowser />
       </div>
-      <FolderBrowser />
-    </section>
+      <BrandedBottomConsultants />
+    </div>
   );
 }

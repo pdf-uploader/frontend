@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -64,10 +65,24 @@ export default function UsersPage() {
 
   return (
     <section className="ui-shell mx-auto max-w-2xl space-y-5">
-      <div>
-        <p className="mb-2 inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+      <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white px-3 py-2.5 shadow-sm sm:px-4">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <Link
+            href="/"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-700 transition hover:bg-slate-100"
+            aria-label="Back to home"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </Link>
+          <p className="text-sm font-medium text-slate-800 sm:text-base">Manage Users</p>
+        </div>
+        <p className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs font-medium text-slate-600">
           Admin
         </p>
+      </div>
+      <div>
         <h1 className="text-2xl font-semibold tracking-tight">Create User</h1>
         <p className="mt-1 text-sm text-slate-600">Only admins can create new users.</p>
       </div>
