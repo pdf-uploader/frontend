@@ -65,6 +65,7 @@ export function FolderBrowser() {
   const [folderNameDraft, setFolderNameDraft] = useState("");
   const [folderLockDraft, setFolderLockDraft] = useState(false);
   const [orderedFolders, setOrderedFolders] = useState<Folder[]>([]);
+  const orderedFoldersRef = useRef<Folder[]>([]);
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -107,8 +108,8 @@ export function FolderBrowser() {
   });
 
   const createFolderMutation = useMutation({
-    mutationFn: async ({ foldername, lock }: { foldername: string; lock: boolean }) =>
-      api.post("/folders", { foldername, lock }),
+    mutationFn: async ({ foldername, lock, order }: { foldername: string; lock: boolean; order: number }) =>
+      api.post("/folders", { foldername, lock, order }),
     onSuccess: () => {
       setNewFolderName("");
       setNewFolderLock(false);
@@ -142,6 +143,18 @@ export function FolderBrowser() {
       setFolderNameDraft("");
       setFolderLockDraft(false);
       queryClient.invalidateQueries({ queryKey: ["folders"] });
+    },
+  });
+
+  const saveFolderOrdersMutation = useMutation({
+    mutationFn: async (orders: { folderId: string; order: number }[]) => {
+      await api.patch("/folders/order", { orders });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["folders"] });
+    },
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: ["folders"] });
     },
   });
 
@@ -190,8 +203,11 @@ export function FolderBrowser() {
     },
   });
 
-  const serverFolderOrderSignature = useMemo(
-    () => (foldersQuery.data ?? []).map((folder) => folder.id).join("|"),
+  const serverFolderListSignature = useMemo(
+    () =>
+      (foldersQuery.data ?? [])
+        .map((folder) => `${folder.id}:${folder.order ?? folder.sortOrder ?? 0}`)
+        .join("|"),
     [foldersQuery.data]
   );
   const searchContextHref = useMemo(() => {
@@ -209,8 +225,18 @@ export function FolderBrowser() {
   }, [urlKeyword]);
 
   useEffect(() => {
-    setOrderedFolders(foldersQuery.data ?? []);
-  }, [serverFolderOrderSignature, foldersQuery.data]);
+    orderedFoldersRef.current = orderedFolders;
+  }, [orderedFolders]);
+
+  useEffect(() => {
+    const data = foldersQuery.data;
+    if (!data) {
+      setOrderedFolders([]);
+      return;
+    }
+    const sorted = sortFoldersByOrder([...data]);
+    setOrderedFolders(sorted);
+  }, [serverFolderListSignature, foldersQuery.data]);
 
   useEffect(() => {
     const models = chatModelsQuery.data;
@@ -344,15 +370,16 @@ export function FolderBrowser() {
       return;
     }
 
-    setOrderedFolders((previous) => {
-      const fromIndex = previous.findIndex((item) => item.id === draggedFolderId);
-      const toIndex = previous.findIndex((item) => item.id === targetFolderId);
-      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
-        return previous;
-      }
-      return moveFolder(previous, fromIndex, toIndex);
-    });
-
+    const next = trySwapFolderList(orderedFoldersRef.current, draggedFolderId, targetFolderId);
+    if (!next) {
+      setDragOverFolderId(null);
+      setDraggedFolderId(null);
+      return;
+    }
+    setOrderedFolders(next);
+    saveFolderOrdersMutation.mutate(
+      next.map((folder, index) => ({ folderId: folder.id, order: index }))
+    );
     setDragOverFolderId(null);
     setDraggedFolderId(null);
   };
@@ -401,7 +428,11 @@ export function FolderBrowser() {
               />
               <button
                 onClick={() =>
-                  createFolderMutation.mutate({ foldername: newFolderName.trim(), lock: newFolderLock })
+                  createFolderMutation.mutate({
+                    foldername: newFolderName.trim(),
+                    lock: newFolderLock,
+                    order: (foldersQuery.data?.length ?? 0) + 1,
+                  })
                 }
                 disabled={!newFolderName.trim() || createFolderMutation.isPending}
                 className="ui-btn-primary"
@@ -444,19 +475,47 @@ export function FolderBrowser() {
 
       {foldersQuery.isLoading && <p className="text-sm text-slate-600">Loading folders...</p>}
       {foldersQuery.error && <p className="text-sm text-red-600">Could not load folders.</p>}
+      {admin && saveFolderOrdersMutation.isPending && (
+        <p className="text-xs text-slate-500">Saving folder order…</p>
+      )}
+      {admin && saveFolderOrdersMutation.isError && (
+        <p className="text-xs text-red-600">
+          Could not save folder order. The list was refreshed from the server; try again if needed.
+        </p>
+      )}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {orderedFolders.map((folder) => {
           const isEditing = admin && editingFolderId === folder.id;
           const cardClass = [
             "block rounded-2xl border bg-white/95 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md",
             dragOverFolderId === folder.id ? "border-slate-400 bg-slate-100" : "border-slate-200/90",
+            draggedFolderId === folder.id ? "opacity-60" : "",
           ].join(" ");
 
           const cardBody = (
             <>
               <div className="mb-2 flex items-start justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                  {admin && <span className="shrink-0 text-sm text-slate-400">⋮⋮</span>}
+                  {admin && (
+                    <span
+                      className="shrink-0 cursor-grab touch-none select-none text-sm text-slate-400 active:cursor-grabbing"
+                      draggable
+                      title="Drag to swap order with another folder"
+                      onDragStart={(event) => {
+                        event.stopPropagation();
+                        setDraggedFolderId(folder.id);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", folder.id);
+                      }}
+                      onDragEnd={() => {
+                        setDragOverFolderId(null);
+                        setDraggedFolderId(null);
+                      }}
+                      onClick={(event) => event.preventDefault()}
+                    >
+                      ⋮⋮
+                    </span>
+                  )}
                   <span className="shrink-0 text-xl">{folder.lock ? "🔒" : "📁"}</span>
                   <span className="min-w-0 truncate text-sm font-semibold text-slate-900">{folder.foldername}</span>
                   {folder.lock && (
@@ -535,36 +594,35 @@ export function FolderBrowser() {
             </>
           );
 
-          const dragProps = {
-            draggable: admin,
-            onDragStart: () => {
-              if (!admin) return;
-              setDraggedFolderId(folder.id);
-            },
-            onDragOver: (event: DragEvent<HTMLElement>) => {
-              if (!admin) return;
-              event.preventDefault();
-              if (draggedFolderId !== folder.id) {
-                setDragOverFolderId(folder.id);
+          const dropTargetProps = admin
+            ? {
+                onDragOver: (event: DragEvent<HTMLElement>) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  if (draggedFolderId && draggedFolderId !== folder.id) {
+                    setDragOverFolderId(folder.id);
+                  }
+                },
+                onDragLeave: (event: DragEvent<HTMLElement>) => {
+                  const next = event.relatedTarget as Node | null;
+                  if (!event.currentTarget.contains(next)) {
+                    setDragOverFolderId((previous) => (previous === folder.id ? null : previous));
+                  }
+                },
+                onDrop: (event: DragEvent<HTMLElement>) => onFolderDrop(event, folder.id),
               }
-            },
-            onDrop: (event: DragEvent<HTMLElement>) => onFolderDrop(event, folder.id),
-            onDragEnd: () => {
-              setDragOverFolderId(null);
-              setDraggedFolderId(null);
-            },
-          };
+            : {};
 
           if (isEditing) {
             return (
-              <div key={folder.id} className={cardClass} {...dragProps}>
+              <div key={folder.id} className={cardClass} {...dropTargetProps}>
                 {cardBody}
               </div>
             );
           }
 
           return (
-            <Link key={folder.id} href={`/folders/${folder.id}`} className={cardClass} {...dragProps}>
+            <Link key={folder.id} href={`/folders/${folder.id}`} className={cardClass} {...dropTargetProps}>
               {cardBody}
             </Link>
           );
@@ -726,14 +784,27 @@ export function FolderBrowser() {
   );
 }
 
-function moveFolder(folders: Folder[], fromIndex: number, toIndex: number): Folder[] {
-  const cloned = [...folders];
-  const [picked] = cloned.splice(fromIndex, 1);
-  if (!picked) {
-    return folders;
+function sortFoldersByOrder(folders: Folder[]): Folder[] {
+  return folders.sort((a, b) => {
+    const ao = a.order ?? a.sortOrder ?? 0;
+    const bo = b.order ?? b.sortOrder ?? 0;
+    if (ao !== bo) {
+      return ao - bo;
+    }
+    return a.foldername.localeCompare(b.foldername);
+  });
+}
+
+/** Swap two folders in place (drop target = exchange positions). Matches “exchange A and B” UX. */
+function trySwapFolderList(folders: Folder[], draggedId: string, targetId: string): Folder[] | null {
+  const i = folders.findIndex((item) => item.id === draggedId);
+  const j = folders.findIndex((item) => item.id === targetId);
+  if (i < 0 || j < 0 || i === j) {
+    return null;
   }
-  cloned.splice(toIndex, 0, picked);
-  return cloned;
+  const next = [...folders];
+  [next[i], next[j]] = [next[j]!, next[i]!];
+  return next;
 }
 
 function highlightKeyword(text: string, keyword: string): ReactNode {

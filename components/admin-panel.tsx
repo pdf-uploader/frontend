@@ -42,7 +42,14 @@ export function AdminPanel() {
   });
 
   const createFolderMutation = useMutation({
-    mutationFn: async () => api.post("/folders", { foldername: folderName, lock: createFolderLock }),
+    mutationFn: async () => {
+      const folderCount = foldersQuery.data?.length ?? 0;
+      return api.post("/folders", {
+        foldername: folderName,
+        lock: createFolderLock,
+        order: folderCount + 1,
+      });
+    },
     onSuccess: () => {
       setFolderName("");
       setCreateFolderLock(false);

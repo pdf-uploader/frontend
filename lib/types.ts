@@ -29,6 +29,9 @@ export interface Folder {
   lock?: boolean;
   createdAt?: string;
   updatedAt?: string;
+  /** Server sort index (lowest first). */
+  order?: number;
+  /** @deprecated prefer `order` if present */
   sortOrder?: number;
   files: FolderFile[];
 }
