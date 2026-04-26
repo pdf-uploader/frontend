@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Fragment, ReactNode } from "react";
-import { DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { DragEvent, FormEvent, MutableRefObject, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import { useDebounce } from "use-debounce";
@@ -68,6 +68,8 @@ export function FolderBrowser() {
   const orderedFoldersRef = useRef<Folder[]>([]);
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const folderDragGhostRef = useRef<HTMLDivElement | null>(null);
+  const folderDragPointerOffsetRef = useRef({ x: 0, y: 0 });
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
@@ -227,6 +229,13 @@ export function FolderBrowser() {
   useEffect(() => {
     orderedFoldersRef.current = orderedFolders;
   }, [orderedFolders]);
+
+  useEffect(() => {
+    return () => {
+      folderDragGhostRef.current?.remove();
+      folderDragGhostRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     const data = foldersQuery.data;
@@ -488,31 +497,19 @@ export function FolderBrowser() {
           const isEditing = admin && editingFolderId === folder.id;
           const cardClass = [
             "block rounded-2xl border bg-white/95 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md",
+            admin && !isEditing ? "cursor-grab active:cursor-grabbing" : "",
             dragOverFolderId === folder.id ? "border-slate-400 bg-slate-100" : "border-slate-200/90",
-            draggedFolderId === folder.id ? "opacity-60" : "",
-          ].join(" ");
+            draggedFolderId === folder.id ? "opacity-[0.38]" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
 
           const cardBody = (
             <>
               <div className="mb-2 flex items-start justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
                   {admin && (
-                    <span
-                      className="shrink-0 cursor-grab touch-none select-none text-sm text-slate-400 active:cursor-grabbing"
-                      draggable
-                      title="Drag to swap order with another folder"
-                      onDragStart={(event) => {
-                        event.stopPropagation();
-                        setDraggedFolderId(folder.id);
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", folder.id);
-                      }}
-                      onDragEnd={() => {
-                        setDragOverFolderId(null);
-                        setDraggedFolderId(null);
-                      }}
-                      onClick={(event) => event.preventDefault()}
-                    >
+                    <span className="shrink-0 select-none text-sm text-slate-400" aria-hidden>
                       ⋮⋮
                     </span>
                   )}
@@ -617,6 +614,50 @@ export function FolderBrowser() {
             return (
               <div key={folder.id} className={cardClass} {...dropTargetProps}>
                 {cardBody}
+              </div>
+            );
+          }
+
+          if (admin) {
+            return (
+              <div
+                key={folder.id}
+                className={cardClass}
+                draggable
+                title="Drag to swap order with another folder"
+                onDragStart={(event) => {
+                  event.stopPropagation();
+                  setDraggedFolderId(folder.id);
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", folder.id);
+                  beginFolderCardDragPreview(event, event.currentTarget, folderDragGhostRef, folderDragPointerOffsetRef);
+                }}
+                onDrag={(event) => {
+                  const ghost = folderDragGhostRef.current;
+                  if (!ghost) {
+                    return;
+                  }
+                  if (event.clientX === 0 && event.clientY === 0) {
+                    return;
+                  }
+                  const { x, y } = folderDragPointerOffsetRef.current;
+                  ghost.style.left = `${event.clientX - x}px`;
+                  ghost.style.top = `${event.clientY - y}px`;
+                }}
+                onDragEnd={() => {
+                  folderDragGhostRef.current?.remove();
+                  folderDragGhostRef.current = null;
+                  setDragOverFolderId(null);
+                  setDraggedFolderId(null);
+                }}
+                {...dropTargetProps}
+              >
+                <Link
+                  href={`/folders/${folder.id}`}
+                  className="block rounded-2xl text-inherit no-underline outline-none [-webkit-tap-highlight-color:transparent] focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2"
+                >
+                  {cardBody}
+                </Link>
               </div>
             );
           }
@@ -793,6 +834,77 @@ function sortFoldersByOrder(folders: Folder[]): Folder[] {
     }
     return a.foldername.localeCompare(b.foldername);
   });
+}
+
+function sanitizeFolderDragGhostRoot(ghost: HTMLDivElement) {
+  const classes = ghost.className.split(/\s+/).filter(Boolean);
+  ghost.className = classes
+    .filter(
+      (c) =>
+        c !== "transition" &&
+        !c.startsWith("hover:") &&
+        !c.startsWith("active:") &&
+        !c.startsWith("cursor-") &&
+        !/^opacity-/.test(c) &&
+        c !== "bg-white/95" &&
+        !c.startsWith("shadow"),
+    )
+    .concat(["bg-white", "shadow-xl"])
+    .join(" ");
+}
+
+/**
+ * Native `setDragImage(DOM)` is often scaled/blurred by the browser. We use a 1×1 transparent
+ * canvas as the system drag image and move a real `position:fixed` clone on `drag` for a sharp preview.
+ */
+function beginFolderCardDragPreview(
+  event: DragEvent<HTMLElement>,
+  cardEl: HTMLElement,
+  ghostRef: MutableRefObject<HTMLDivElement | null>,
+  pointerOffsetRef: MutableRefObject<{ x: number; y: number }>,
+) {
+  ghostRef.current?.remove();
+  ghostRef.current = null;
+
+  const rect = cardEl.getBoundingClientRect();
+  const offsetX = Math.max(0, Math.min(event.clientX - rect.left, rect.width));
+  const offsetY = Math.max(0, Math.min(event.clientY - rect.top, rect.height));
+  pointerOffsetRef.current = { x: offsetX, y: offsetY };
+
+  const hideNativeDrag = document.createElement("canvas");
+  hideNativeDrag.width = 1;
+  hideNativeDrag.height = 1;
+  event.dataTransfer.setDragImage(hideNativeDrag, 0, 0);
+
+  const ghost = cardEl.cloneNode(true) as HTMLDivElement;
+  ghost.removeAttribute("id");
+  ghost.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+  sanitizeFolderDragGhostRoot(ghost);
+
+  ghost.style.boxSizing = "border-box";
+  ghost.style.position = "fixed";
+  ghost.style.left = `${event.clientX - offsetX}px`;
+  ghost.style.top = `${event.clientY - offsetY}px`;
+  ghost.style.width = `${rect.width}px`;
+  ghost.style.margin = "0";
+  ghost.style.pointerEvents = "none";
+  ghost.style.zIndex = "2147483647";
+  ghost.style.setProperty("filter", "none", "important");
+  ghost.style.setProperty("backdrop-filter", "none", "important");
+  ghost.style.setProperty("-webkit-backdrop-filter", "none", "important");
+  ghost.style.setProperty("opacity", "1", "important");
+  ghost.style.setProperty("background-color", "#ffffff", "important");
+  ghost.style.setProperty("box-shadow", "0 28px 55px rgba(15, 23, 42, 0.28), 0 0 0 1px rgba(15, 23, 42, 0.08)");
+  ghost.draggable = false;
+  ghost.querySelectorAll<HTMLElement>("[draggable]").forEach((el) => el.removeAttribute("draggable"));
+  ghost.querySelectorAll<HTMLElement>("*").forEach((el) => {
+    el.style.setProperty("filter", "none", "important");
+    el.style.setProperty("backdrop-filter", "none", "important");
+    el.style.setProperty("-webkit-backdrop-filter", "none", "important");
+  });
+
+  document.body.appendChild(ghost);
+  ghostRef.current = ghost;
 }
 
 /** Swap two folders in place (drop target = exchange positions). Matches “exchange A and B” UX. */
