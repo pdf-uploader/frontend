@@ -9,8 +9,8 @@ type UgandaBrandedBackdropProps = {
 };
 
 /**
- * Map background. Prefer `content` inside a `relative min-h-0 flex-1` row so
- * object-contain shows all of Uganda in the visible area between header and footer.
+ * Branded background image. Prefer `content` inside a `relative min-h-0 flex-1` row so
+ * object-contain keeps the full graphic visible between header and footer.
  */
 export function UgandaBrandedBackdrop({ variant = "content" }: UgandaBrandedBackdropProps) {
   const rootClass =

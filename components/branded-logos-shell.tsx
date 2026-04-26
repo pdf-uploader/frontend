@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 
-const DEFAULT_HEADLINE = "UGANDA  EXPRESSWAY MANUAL MANAGEMENT";
+const DEFAULT_HEADLINE = "Uganda Expressway Integrated Manual and Bridge Management System";
 
 type BrandedTopLogosProps = {
   /** When set, a Login control is shown before the KOICA logo. */
@@ -26,7 +26,7 @@ export function BrandedTopLogos({ loginHref, headline = DEFAULT_HEADLINE }: Bran
             sizes="(max-width: 640px) 176px, 208px"
           />
         </div>
-        <h1 className="[grid-area:title] col-span-2 min-w-0 max-w-full whitespace-pre-wrap px-1 text-center text-balance font-extrabold uppercase leading-tight text-blue-950 sm:col-span-1 sm:px-2 sm:leading-[1.12] sm:tracking-wide md:px-3 md:leading-tight md:tracking-tighter lg:px-4 [font-size:clamp(0.9rem,3.2vw+0.3rem,1.75rem)] sm:[font-size:clamp(1.05rem,1.4vw+0.65rem,1.9rem)] md:[font-size:clamp(1.2rem,1.1vw+0.85rem,2.25rem)] lg:[font-size:clamp(1.35rem,0.9vw+1.05rem,2.6rem)] xl:[font-size:clamp(1.5rem,0.8vw+1.2rem,2.75rem)]">
+        <h1 className="[grid-area:title] col-span-2 min-w-0 max-w-full whitespace-pre-wrap px-1 text-center text-balance font-extrabold leading-tight text-blue-950 sm:col-span-1 sm:px-2 sm:leading-[1.12] sm:tracking-wide md:px-3 md:leading-tight md:tracking-tighter lg:px-4 [font-size:clamp(0.9rem,3.2vw+0.3rem,1.75rem)] sm:[font-size:clamp(1.05rem,1.4vw+0.65rem,1.9rem)] md:[font-size:clamp(1.2rem,1.1vw+0.85rem,2.25rem)] lg:[font-size:clamp(1.35rem,0.9vw+1.05rem,2.6rem)] xl:[font-size:clamp(1.5rem,0.8vw+1.2rem,2.75rem)]">
           {headline}
         </h1>
         <div className="[grid-area:actions] flex items-center justify-end gap-1.5 sm:min-w-0 sm:gap-2 md:gap-3">
