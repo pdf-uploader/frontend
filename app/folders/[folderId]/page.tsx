@@ -1,7 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, DragEvent, Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  DragEvent,
+  Fragment,
+  type RefObject,
+  ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useDebounce } from "use-debounce";
@@ -25,6 +35,8 @@ const PAGE_CHUNK_SIZE = 5;
 type FileSortField = "filename" | "createdAt" | "number";
 type SortDirection = "desc" | "asc";
 
+type UploadUiPhase = "idle" | "uploading" | "done" | "error";
+
 export default function FolderPage() {
   const params = useParams<{ folderId: string }>();
   const pathname = usePathname();
@@ -41,6 +53,12 @@ export default function FolderPage() {
   const [fileSortField, setFileSortField] = useState<FileSortField | null>(null);
   const [fileSortDirection, setFileSortDirection] = useState<SortDirection>("desc");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadUi, setUploadUi] = useState<{
+    phase: UploadUiPhase;
+    percent: number;
+    indeterminate: boolean;
+    fileCount: number;
+  }>({ phase: "idle", percent: 0, indeterminate: false, fileCount: 0 });
   const [debouncedFolderSearch] = useDebounce(folderSearch, 300);
 
   const folderQuery = useQuery({
@@ -66,10 +84,44 @@ export default function FolderPage() {
       files.forEach((file) => formData.append("pdf", file));
       await api.post(`/files/upload/${folderId}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress: (event) => {
+          const total = event.total ?? 0;
+          if (total > 0) {
+            const percent = Math.min(100, Math.round((event.loaded / total) * 100));
+            setUploadUi((previous) => ({
+              ...previous,
+              phase: "uploading",
+              percent,
+              indeterminate: false,
+            }));
+          }
+        },
+      });
+    },
+    onMutate: (files: File[]) => {
+      setUploadUi({
+        phase: "uploading",
+        percent: 0,
+        indeterminate: true,
+        fileCount: files.length,
       });
     },
     onSuccess: () => {
-      folderQuery.refetch();
+      setUploadUi((previous) => ({
+        ...previous,
+        phase: "done",
+        percent: 100,
+        indeterminate: false,
+      }));
+      void folderQuery.refetch();
+    },
+    onError: () => {
+      setUploadUi((previous) => ({
+        ...previous,
+        phase: "error",
+        percent: 0,
+        indeterminate: false,
+      }));
     },
   });
 
@@ -110,6 +162,16 @@ export default function FolderPage() {
   useEffect(() => {
     setFolderSearch(urlKeyword);
   }, [urlKeyword]);
+
+  useEffect(() => {
+    if (uploadUi.phase !== "done") {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setUploadUi({ phase: "idle", percent: 0, indeterminate: false, fileCount: 0 });
+    }, 2800);
+    return () => window.clearTimeout(timer);
+  }, [uploadUi.phase]);
 
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -169,7 +231,7 @@ export default function FolderPage() {
     setDragging(false);
     setDragCounter(0);
     if (!admin || folderLocked) return;
-    const files = Array.from(event.dataTransfer.files).filter((file) => file.type === "application/pdf");
+    const files = collectPdfFiles(event.dataTransfer.files);
     if (files.length) {
       uploadMutation.mutate(files);
     }
@@ -177,7 +239,7 @@ export default function FolderPage() {
 
   const onFilePick = (event: ChangeEvent<HTMLInputElement>) => {
     if (!admin || folderLocked) return;
-    const files = Array.from(event.target.files ?? []);
+    const files = collectPdfFiles(event.target.files ?? []);
     if (files.length) {
       uploadMutation.mutate(files);
     }
@@ -275,33 +337,27 @@ export default function FolderPage() {
         )}
       </div>
 
+      {admin && (
+        <PdfUploadDropZone
+          locked={folderLocked}
+          fileInputRef={fileInputRef}
+          uploadPhase={uploadUi.phase}
+          uploadPercent={uploadUi.percent}
+          uploadIndeterminate={uploadUi.indeterminate}
+          uploadFileCount={uploadUi.fileCount}
+          onFilePick={onFilePick}
+          onUploadFiles={(files) => uploadMutation.mutate(files)}
+        />
+      )}
+
       <div className="ui-card-soft border-dashed p-4 text-sm">
         {admin ? (
           <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className={folderLocked ? "text-slate-500" : undefined}>
-                {folderLocked
-                  ? "Unlock this folder on the library home to add or remove files."
-                  : "Drop PDF files anywhere on this page or use + to upload multiple files"}
+            {!folderLocked && (
+              <p className="text-xs text-slate-500">
+                You can also drop PDF files anywhere on this page while viewing this folder.
               </p>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="ui-btn-primary h-8 w-8 p-0 text-base"
-                title={folderLocked ? "Folder is locked" : "Upload files"}
-                disabled={folderLocked}
-              >
-                +
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="application/pdf"
-                multiple
-                className="hidden"
-                onChange={onFilePick}
-                disabled={folderLocked}
-              />
-            </div>
+            )}
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
               <p className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sort</p>
               <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1">
@@ -377,6 +433,201 @@ export default function FolderPage() {
         {!orderedFiles.length && <li className="text-xs text-slate-500">No files in this folder yet.</li>}
       </ul>
     </section>
+  );
+}
+
+function uploadFileCountLabel(count: number): string {
+  if (count <= 0) {
+    return "";
+  }
+  return count === 1 ? "1 file" : `${count} files`;
+}
+
+function collectPdfFiles(source: FileList | File[] | null | undefined): File[] {
+  if (!source) {
+    return [];
+  }
+  return Array.from(source).filter(
+    (file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+  );
+}
+
+function PdfUploadDropZone({
+  locked,
+  fileInputRef,
+  uploadPhase,
+  uploadPercent,
+  uploadIndeterminate,
+  uploadFileCount,
+  onFilePick,
+  onUploadFiles,
+}: {
+  locked: boolean;
+  fileInputRef: RefObject<HTMLInputElement | null>;
+  uploadPhase: UploadUiPhase;
+  uploadPercent: number;
+  uploadIndeterminate: boolean;
+  uploadFileCount: number;
+  onFilePick: (event: ChangeEvent<HTMLInputElement>) => void;
+  onUploadFiles: (files: File[]) => void;
+}) {
+  const [active, setActive] = useState(false);
+  const isUploading = uploadPhase === "uploading";
+
+  if (locked) {
+    return (
+      <div
+        className="ui-card-soft flex min-h-[160px] flex-col items-center justify-center border-2 border-dashed border-slate-200 px-6 py-10 text-center"
+        aria-live="polite"
+      >
+        <p className="max-w-md text-sm text-slate-600">
+          This folder is locked. Unlock it from the library home to upload PDFs.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={[
+        "ui-card flex min-h-[200px] flex-col items-center justify-center border-2 border-dashed px-6 py-8 text-center transition",
+        active ? "border-sky-400 bg-sky-50/50 ring-2 ring-sky-200/60" : "border-slate-300/90 bg-white/95",
+        isUploading ? "pointer-events-none opacity-95" : "",
+      ].join(" ")}
+      onDragEnter={(event) => {
+        if (isUploading) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setActive(true);
+      }}
+      onDragOver={(event) => {
+        if (isUploading) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "copy";
+      }}
+      onDragLeave={(event) => {
+        event.preventDefault();
+        const next = event.relatedTarget as Node | null;
+        if (!event.currentTarget.contains(next)) {
+          setActive(false);
+        }
+      }}
+      onDrop={(event) => {
+        if (isUploading) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setActive(false);
+        const files = collectPdfFiles(event.dataTransfer.files);
+        if (files.length) {
+          onUploadFiles(files);
+        }
+      }}
+    >
+      <div
+        className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-2xl text-sky-500"
+        aria-hidden
+      >
+        📄
+      </div>
+      <p className="text-sm font-semibold text-slate-800">Upload PDF files</p>
+      <p className="mt-1 max-w-sm text-xs text-slate-600">
+        Drag and drop files into this area, or choose files from your device. PDF only; multiple files allowed.
+      </p>
+      <button
+        type="button"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={isUploading}
+        className="ui-btn-primary mt-5 gap-2"
+      >
+        <svg
+          className="h-4 w-4 shrink-0"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        Choose files
+      </button>
+
+      <div className="mt-6 w-full max-w-md px-1" aria-live="polite">
+        {uploadPhase === "uploading" && (
+          <div className="space-y-2 text-left">
+            <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
+              {uploadIndeterminate ? (
+                <div className="pdf-upload-indeterminate-bar h-full w-[38%] rounded-full bg-sky-500" />
+              ) : (
+                <div
+                  className="h-full rounded-full bg-sky-500 transition-[width] duration-200 ease-out"
+                  style={{ width: `${Math.max(2, uploadPercent)}%` }}
+                />
+              )}
+            </div>
+            <p className="text-center text-xs font-medium text-slate-600">
+              {uploadFileCount > 0
+                ? `Uploading ${uploadFileCountLabel(uploadFileCount)}${uploadIndeterminate ? "…" : ""}`
+                : "Uploading…"}
+              {!uploadIndeterminate && uploadPercent > 0 ? ` · ${uploadPercent}%` : ""}
+            </p>
+          </div>
+        )}
+        {uploadPhase === "done" && (
+          <div className="flex flex-col items-center justify-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 py-2.5 text-sm font-medium text-emerald-800">
+            <div className="flex items-center justify-center gap-2">
+              <span
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-xs text-white"
+                aria-hidden
+              >
+                ✓
+              </span>
+              Upload complete
+            </div>
+            {uploadFileCount > 0 && (
+              <p className="text-xs font-normal text-emerald-700/90">
+                {uploadFileCountLabel(uploadFileCount)} uploaded
+              </p>
+            )}
+          </div>
+        )}
+        {uploadPhase === "error" && (
+          <p className="rounded-xl border border-red-200 bg-red-50 py-2.5 text-center text-sm text-red-700">
+            {uploadFileCount > 0
+              ? `Upload failed (${uploadFileCountLabel(uploadFileCount)}). Please try again.`
+              : "Upload failed. Please try again."}
+          </p>
+        )}
+      </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        multiple
+        className="hidden"
+        onChange={onFilePick}
+        disabled={isUploading}
+      />
+      <style jsx>{`
+        @keyframes pdf-upload-indeterminate-slide {
+          0% {
+            transform: translateX(-100%);
+          }
+          100% {
+            transform: translateX(350%);
+          }
+        }
+        .pdf-upload-indeterminate-bar {
+          animation: pdf-upload-indeterminate-slide 1.15s ease-in-out infinite;
+        }
+      `}</style>
+    </div>
   );
 }
 
