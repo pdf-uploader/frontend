@@ -361,42 +361,42 @@ export default function FolderPage() {
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
               <p className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sort</p>
               <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1">
-              <button
-                type="button"
-                onClick={() => toggleFileSort("filename")}
-                className={[
-                  "rounded-full px-3 py-1.5 font-medium transition",
-                  fileSortField === "filename"
-                    ? "bg-slate-900 text-white shadow-sm"
-                    : "text-slate-600 hover:bg-white hover:text-slate-900",
-                ].join(" ")}
-              >
-                Filename {fileSortField === "filename" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleFileSort("number")}
-                className={[
-                  "rounded-full px-3 py-1.5 font-medium transition",
-                  fileSortField === "number"
-                    ? "bg-slate-900 text-white shadow-sm"
-                    : "text-slate-600 hover:bg-white hover:text-slate-900",
-                ].join(" ")}
-              >
-                Number {fileSortField === "number" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleFileSort("createdAt")}
-                className={[
-                  "rounded-full px-3 py-1.5 font-medium transition",
-                  fileSortField === "createdAt"
-                    ? "bg-slate-900 text-white shadow-sm"
-                    : "text-slate-600 hover:bg-white hover:text-slate-900",
-                ].join(" ")}
-              >
-                Created {fileSortField === "createdAt" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => toggleFileSort("filename")}
+                  className={[
+                    "rounded-full px-3 py-1.5 font-medium transition",
+                    fileSortField === "filename"
+                      ? "bg-slate-900 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-white hover:text-slate-900",
+                  ].join(" ")}
+                >
+                  Filename {fileSortField === "filename" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleFileSort("number")}
+                  className={[
+                    "rounded-full px-3 py-1.5 font-medium transition",
+                    fileSortField === "number"
+                      ? "bg-slate-900 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-white hover:text-slate-900",
+                  ].join(" ")}
+                >
+                  Number {fileSortField === "number" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleFileSort("createdAt")}
+                  className={[
+                    "rounded-full px-3 py-1.5 font-medium transition",
+                    fileSortField === "createdAt"
+                      ? "bg-slate-900 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-white hover:text-slate-900",
+                  ].join(" ")}
+                >
+                  Created {fileSortField === "createdAt" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}
+                </button>
               </div>
             </div>
           </div>
@@ -407,28 +407,28 @@ export default function FolderPage() {
 
       <ul className="ui-card space-y-2 p-3">
         {visibleFiles.map((file) => (
-            <li
-              key={file.id}
-              className="flex items-center justify-between rounded border border-slate-200 px-3 py-2 text-sm transition"
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <Link href={`/files/${file.id}`} className="truncate break-keep text-slate-700 hover:underline">
-                  📄 {file.filename}
-                </Link>
+          <li
+            key={file.id}
+            className="flex items-center justify-between rounded border border-slate-200 px-3 py-2 text-sm transition"
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <Link href={`/files/${file.id}`} className="truncate break-keep text-slate-700 hover:underline">
+                📄 {file.filename}
+              </Link>
+            </div>
+            {admin && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => deleteFileMutation.mutate(file.id)}
+                  className="rounded px-1 text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={folderLocked ? "Folder is locked" : "Delete file"}
+                  disabled={folderLocked}
+                >
+                  🗑
+                </button>
               </div>
-              {admin && (
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => deleteFileMutation.mutate(file.id)}
-                    className="rounded px-1 text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
-                    title={folderLocked ? "Folder is locked" : "Delete file"}
-                    disabled={folderLocked}
-                  >
-                    🗑
-                  </button>
-                </div>
-              )}
-            </li>
+            )}
+          </li>
         ))}
         {!orderedFiles.length && <li className="text-xs text-slate-500">No files in this folder yet.</li>}
       </ul>
@@ -477,10 +477,10 @@ function PdfUploadDropZone({
   if (locked) {
     return (
       <div
-        className="ui-card-soft flex min-h-[160px] flex-col items-center justify-center border-2 border-dashed border-slate-200 px-6 py-10 text-center"
+        className="ui-card-soft flex min-h-[52px] flex-col items-center justify-center border-2 border-dashed border-slate-200 px-4 py-2.5 text-center"
         aria-live="polite"
       >
-        <p className="max-w-md text-sm text-slate-600">
+        <p className="max-w-md text-xs text-slate-600 sm:text-sm">
           This folder is locked. Unlock it from the library home to upload PDFs.
         </p>
       </div>
@@ -490,7 +490,7 @@ function PdfUploadDropZone({
   return (
     <div
       className={[
-        "ui-card flex min-h-[200px] flex-col items-center justify-center border-2 border-dashed px-6 py-8 text-center transition",
+        "ui-card flex flex-col border-2 border-dashed px-3 py-2.5 text-center transition sm:px-4",
         active ? "border-sky-400 bg-sky-50/50 ring-2 ring-sky-200/60" : "border-slate-300/90 bg-white/95",
         isUploading ? "pointer-events-none opacity-95" : "",
       ].join(" ")}
@@ -524,40 +524,44 @@ function PdfUploadDropZone({
         }
       }}
     >
-      <div
-        className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-2xl text-sky-500"
-        aria-hidden
-      >
-        📄
-      </div>
-      <p className="text-sm font-semibold text-slate-800">Upload PDF files</p>
-      <p className="mt-1 max-w-sm text-xs text-slate-600">
-        Drag and drop files into this area, or choose files from your device. PDF only; multiple files allowed.
-      </p>
-      <button
-        type="button"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={isUploading}
-        className="ui-btn-primary mt-5 gap-2"
-      >
-        <svg
-          className="h-4 w-4 shrink-0"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+      <div className="flex min-h-[4.5rem] flex-col items-stretch justify-center gap-2 sm:min-h-[4.25rem] sm:flex-row sm:items-center sm:gap-3 sm:text-left">
+        <div
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-xl border border-slate-200 bg-slate-50 text-lg text-sky-500 sm:self-auto sm:text-xl"
           aria-hidden
         >
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="17 8 12 3 7 8" />
-          <line x1="12" y1="3" x2="12" y2="15" />
-        </svg>
-        Choose files
-      </button>
+          📄
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-slate-800">Upload PDF files</p>
+          <p className="mt-0.5 max-w-xl text-[11px] leading-snug text-slate-600 sm:text-xs">
+            Drag and drop PDFs here or choose files. Multiple files allowed.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isUploading}
+          className="ui-btn-primary mt-1 inline-flex w-full shrink-0 gap-2 py-2 text-xs sm:mt-0 sm:w-auto sm:py-2 sm:text-sm"
+        >
+          <svg
+            className="h-4 w-4 shrink-0"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          Choose files
+        </button>
+      </div>
 
-      <div className="mt-6 w-full max-w-md px-1" aria-live="polite">
+      <div className="mt-3 w-full max-w-md px-0.5" aria-live="polite">
         {uploadPhase === "uploading" && (
           <div className="space-y-2 text-left">
             <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
