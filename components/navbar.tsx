@@ -52,9 +52,23 @@ export function Navbar() {
           <BrandedSystemNavbarTitle />
         </div>
         <div className="flex shrink-0 items-center justify-end gap-1.5 sm:gap-2.5">
-          <p className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[0.65rem] font-semibold tracking-wide text-emerald-800 sm:px-3 sm:text-xs">
-            {roleLabel}
-          </p>
+          {canManageUsers ? (
+            <Link
+              href="/"
+              className={[
+                "shrink-0 rounded-full px-2.5 py-1 text-[0.65rem] transition sm:px-3 sm:text-xs",
+                isUsersRoute
+                  ? "font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+                  : "border border-emerald-200 bg-emerald-50 font-semibold tracking-wide text-emerald-800",
+              ].join(" ")}
+            >
+              {roleLabel}
+            </Link>
+          ) : (
+            <p className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[0.65rem] font-semibold tracking-wide text-emerald-800 sm:px-3 sm:text-xs">
+              {roleLabel}
+            </p>
+          )}
           {canManageUsers && (
             <Link
               href="/users"
