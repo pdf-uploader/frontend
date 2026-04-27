@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Fragment, ReactNode } from "react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import axios from "axios";
 import { api } from "@/lib/api";
 import { rehypeAppendStreamCursor } from "@/lib/rehype-append-stream-cursor";
@@ -27,6 +27,16 @@ interface ChatModelOption {
   label: string;
 }
 
+interface DocumentChatWidgetProps {
+  /** Current folder for document-scoped chat; use "" on the home library. */
+  folderId?: string;
+}
+
+const CHAT_MODEL_OPTIONS: readonly ChatModelOption[] = [
+  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
+];
+
 interface AssistantTypingState {
   messageId: string;
   fullText: string;
@@ -34,7 +44,7 @@ interface AssistantTypingState {
   referencedPages: ChatReferenceLink[];
 }
 
-export function DocumentChatWidget() {
+export function DocumentChatWidget({ folderId = "" }: DocumentChatWidgetProps) {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
@@ -46,18 +56,11 @@ export function DocumentChatWidget() {
     },
   ]);
   const [assistantTyping, setAssistantTyping] = useState<AssistantTypingState | null>(null);
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const chatViewportRef = useRef<HTMLDivElement | null>(null);
+  const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const requestSequenceRef = useRef(0);
   const blockedRequestIdsRef = useRef<Set<number>>(new Set());
-  const chatModelsQuery = useQuery({
-    queryKey: ["chatbot", "chat", "models"],
-    queryFn: async () => {
-      const { data } = await api.get<unknown>("/chatbot/chat/models");
-      return normalizeChatModels(data);
-    },
-    enabled: isChatOpen,
-    staleTime: 60_000,
-  });
   const chatMutation = useMutation({
     mutationFn: async ({
       message,
@@ -68,7 +71,9 @@ export function DocumentChatWidget() {
       requestId: number;
       model: string;
     }) => {
-      const body = model ? { model, message } : { message };
+      const body = model
+        ? { folderId, model, message }
+        : { folderId, message };
       const response = await api.post("/chatbot/chat", body);
       const resolved = resolveChatbotResponse(response.data);
       return { ...resolved, requestId };
@@ -104,18 +109,42 @@ export function DocumentChatWidget() {
   });
 
   useEffect(() => {
-    const models = chatModelsQuery.data;
-    if (!models?.length) {
-      setSelectedModelId("");
-      return;
-    }
     setSelectedModelId((current) => {
-      if (current && models.some((m) => m.id === current)) {
+      if (current && CHAT_MODEL_OPTIONS.some((m) => m.id === current)) {
         return current;
       }
-      return models[0]?.id ?? "";
+      return CHAT_MODEL_OPTIONS[0]?.id ?? "";
     });
-  }, [chatModelsQuery.data]);
+  }, []);
+
+  useEffect(() => {
+    if (!isChatOpen) {
+      setIsModelMenuOpen(false);
+    }
+  }, [isChatOpen]);
+
+  useEffect(() => {
+    if (!isModelMenuOpen) {
+      return;
+    }
+    const onPointerDown = (event: MouseEvent) => {
+      const el = modelMenuRef.current;
+      if (el && !el.contains(event.target as Node)) {
+        setIsModelMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsModelMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isModelMenuOpen]);
 
   useEffect(() => {
     if (!chatViewportRef.current) {
@@ -177,8 +206,7 @@ export function DocumentChatWidget() {
   const submitChatMessage = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedMessage = chatInput.trim();
-    const models = chatModelsQuery.data ?? [];
-    const modelRequired = models.length > 0;
+    const modelRequired = CHAT_MODEL_OPTIONS.length > 0;
     if (
       !trimmedMessage ||
       chatMutation.isPending ||
@@ -209,6 +237,10 @@ export function DocumentChatWidget() {
   };
 
   const isConversationRunning = chatMutation.isPending || Boolean(assistantTyping);
+  const selectedModelLabel =
+    CHAT_MODEL_OPTIONS.find((m) => m.id === selectedModelId)?.label ?? CHAT_MODEL_OPTIONS[0]?.label ?? "";
+  const modelPickerDisabled = chatMutation.isPending || Boolean(assistantTyping);
+
   return (
     <>
             <button
@@ -221,32 +253,114 @@ export function DocumentChatWidget() {
 
             {isChatOpen && (
               <div className="fixed bottom-20 right-5 z-40 flex h-[34rem] w-[23rem] flex-col overflow-hidden rounded-[2rem] border border-slate-200 bg-[#fafafc] shadow-[0_30px_80px_rgba(15,23,42,0.18)]">
-                <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3.5">
-                  <div className="flex items-center gap-2.5">
-                    <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-700 text-sm font-semibold text-white">
-                      AI
+                <div className="relative z-30 flex items-center justify-between overflow-visible border-b border-slate-200 bg-white px-4 py-3.5">
+                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                    <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-700 text-sm font-semibold text-white">
+                      G
                     </div>
-                    <div className="leading-tight">
-                      <p className="text-sm font-semibold text-slate-900">AI Assistant</p>
+                    <div className="min-w-0 flex-1 leading-tight">
+                      <div className="relative w-full min-w-0" ref={modelMenuRef}>
+                        <button
+                          type="button"
+                          id="chat-model-trigger"
+                          aria-haspopup="listbox"
+                          aria-expanded={isModelMenuOpen}
+                          aria-label={`Model: ${selectedModelLabel}. Change model`}
+                          disabled={modelPickerDisabled}
+                          onClick={() => {
+                            if (!modelPickerDisabled) {
+                              setIsModelMenuOpen((open) => !open);
+                            }
+                          }}
+                          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-lg py-0.5 pl-0.5 pr-0 text-left text-sm font-semibold text-slate-900 outline-none ring-sky-500/40 transition hover:bg-slate-100 focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <span className="min-w-0 truncate">{selectedModelLabel}</span>
+                          <svg
+                            className={[
+                              "h-3.5 w-3.5 shrink-0 text-slate-500 transition",
+                              isModelMenuOpen ? "rotate-180" : "",
+                            ].join(" ")}
+                            fill="none"
+                            viewBox="0 0 20 20"
+                            stroke="currentColor"
+                            strokeWidth={2.25}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden
+                          >
+                            <path d="M5 7.5 10 12.5 15 7.5" />
+                          </svg>
+                        </button>
+                        {isModelMenuOpen && (
+                          <ul
+                            role="listbox"
+                            aria-labelledby="chat-model-trigger"
+                            className="absolute left-0 top-full z-[100] mt-1.5 w-max min-w-0 max-w-[13.5rem] list-none space-y-0.5 overflow-hidden rounded-xl border border-slate-200/90 bg-white/95 p-1 shadow-[0_10px_40px_-4px_rgba(15,23,42,0.18),0_4px_16px_-4px_rgba(15,23,42,0.1)] ring-1 ring-slate-900/5 backdrop-blur-sm"
+                          >
+                            {CHAT_MODEL_OPTIONS.map((option) => {
+                              const isSelected = option.id === selectedModelId;
+                              return (
+                                <li key={option.id} role="presentation">
+                                  <button
+                                    type="button"
+                                    id={`chat-model-option-${option.id}`}
+                                    role="option"
+                                    aria-selected={isSelected}
+                                    onClick={() => {
+                                      setSelectedModelId(option.id);
+                                      setIsModelMenuOpen(false);
+                                    }}
+                                    className={[
+                                      "flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] font-medium leading-snug transition",
+                                      isSelected
+                                        ? "bg-sky-500 text-white"
+                                        : "text-slate-700 hover:bg-slate-100",
+                                    ].join(" ")}
+                                  >
+                                    <span className="min-w-0 break-words">{option.label}</span>
+                                    {isSelected && (
+                                      <svg
+                                        className="h-3.5 w-3.5 shrink-0 text-white/90"
+                                        viewBox="0 0 20 20"
+                                        fill="currentColor"
+                                        aria-hidden
+                                      >
+                                        <path
+                                          fillRule="evenodd"
+                                          d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 9.5a.75.75 0 0 1-1.106.04l-4.5-4.5a.75.75 0 1 1 1.06-1.06l3.894 3.893 7.48-8.885a.75.75 0 0 1 1.029-.04Z"
+                                          clipRule="evenodd"
+                                        />
+                                      </svg>
+                                    )}
+                                  </button>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
                       <p className="text-[11px] text-emerald-600">Active now</p>
                     </div>
                   </div>
                   <button
                     onClick={() => setIsChatOpen(false)}
                     title="Close chatbot"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-xs text-slate-500 transition hover:bg-slate-200 hover:text-slate-700"
+                    className="ml-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs text-slate-500 transition hover:bg-slate-200 hover:text-slate-700"
                   >
                     ✕
                   </button>
                 </div>
-                <div ref={chatViewportRef} className="flex-1 space-y-2.5 overflow-y-auto bg-[#f3f4f8] px-3 py-4">
+                <div
+                  ref={chatViewportRef}
+                  className="relative z-0 flex min-h-0 flex-1 flex-col space-y-2.5 overflow-y-auto bg-[#f3f4f8] px-3 py-4"
+                >
                   {chatMessages.map((message) => {
                     const isTypingMessage = assistantTyping?.messageId === message.id;
                     const isAssistant = message.role === "assistant";
                     return (
                       <div
                         key={message.id}
-                        className={["flex", message.role === "user" ? "justify-end" : "justify-start"].join(" ")}
+                        className={["flex w-full shrink-0", message.role === "user" ? "justify-end" : "justify-start"].join(" ")}
                       >
                         <div
                           className={[
@@ -307,56 +421,41 @@ export function DocumentChatWidget() {
                     </div>
                   )}
                 </div>
-                <form onSubmit={submitChatMessage} className="border-t border-slate-200 bg-white p-3">
-                  <div className="mb-2 flex flex-col gap-1">
-                    <label htmlFor="chat-model" className="text-[11px] font-medium text-slate-500">
-                      Model
-                    </label>
-                    <select
-                      id="chat-model"
-                      value={selectedModelId}
-                      onChange={(event) => setSelectedModelId(event.target.value)}
-                      disabled={chatModelsQuery.isLoading || chatMutation.isPending || Boolean(assistantTyping)}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 outline-none focus:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {chatModelsQuery.isLoading && <option value="">Loading models…</option>}
-                      {chatModelsQuery.isError && <option value="">Could not load models</option>}
-                      {!chatModelsQuery.isLoading &&
-                        !chatModelsQuery.isError &&
-                        (chatModelsQuery.data?.length ?? 0) === 0 && <option value="">No models available</option>}
-                      {chatModelsQuery.data?.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-1.5">
-                    <button
-                      type="button"
-                      aria-label="Add attachment"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg text-slate-600 shadow-sm"
-                    >
-                      +
-                    </button>
+                <form
+                  onSubmit={submitChatMessage}
+                  className="border-t border-slate-100 bg-white/95 px-3 pb-3.5 pt-2.5 backdrop-blur"
+                >
+                  <div className="group flex min-h-[48px] items-center gap-2 rounded-2xl border border-slate-200/90 bg-white px-3 py-1 shadow-sm transition focus-within:border-slate-300/80 focus-within:shadow-md focus-within:shadow-slate-900/5">
                     <input
                       value={chatInput}
                       onChange={(event) => setChatInput(event.target.value)}
-                      placeholder="iMessage"
-                      className="h-9 flex-1 border-0 bg-transparent px-2 text-sm text-slate-800 outline-none placeholder:text-slate-500"
+                      placeholder="Ask about your documents…"
+                      className="min-h-[40px] flex-1 border-0 bg-transparent py-2 text-[13px] leading-snug text-slate-800 outline-none ring-0 placeholder:text-slate-400 focus:outline-none focus:ring-0"
                     />
                     <button
                       type={isConversationRunning ? "button" : "submit"}
                       onClick={isConversationRunning ? stopConversation : undefined}
                       disabled={
                         !isConversationRunning &&
-                        (!chatInput.trim() ||
-                          ((chatModelsQuery.data?.length ?? 0) > 0 && !selectedModelId))
+                        (!chatInput.trim() || (CHAT_MODEL_OPTIONS.length > 0 && !selectedModelId))
                       }
                       title={isConversationRunning ? "Stop conversation" : "Send message"}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#1980ff] text-sm font-semibold text-white transition hover:bg-[#0f68e8] disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500 text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
                     >
-                      {isConversationRunning ? "■" : "↑"}
+                      {isConversationRunning ? (
+                        <span className="text-xs font-bold" aria-hidden>
+                          ■
+                        </span>
+                      ) : (
+                        <svg
+                          className="h-4 w-4 translate-x-px"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          aria-hidden
+                        >
+                          <path d="M3.478 2.404a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z" />
+                        </svg>
+                      )}
                     </button>
                   </div>
                 </form>
@@ -364,52 +463,6 @@ export function DocumentChatWidget() {
             )}
     </>
   );
-}
-
-function normalizeChatModels(payload: unknown): ChatModelOption[] {
-  if (Array.isArray(payload)) {
-    return payload.map((entry, index) => chatModelFromUnknown(entry, index)).filter(Boolean) as ChatModelOption[];
-  }
-  if (!payload || typeof payload !== "object") {
-    return [];
-  }
-  const record = payload as Record<string, unknown>;
-  const nested =
-    record.models ??
-    record.data ??
-    record.items ??
-    record.results ??
-    record.modelList;
-  if (Array.isArray(nested)) {
-    return nested.map((entry, index) => chatModelFromUnknown(entry, index)).filter(Boolean) as ChatModelOption[];
-  }
-  return [];
-}
-
-function chatModelFromUnknown(entry: unknown, index: number): ChatModelOption | null {
-  if (typeof entry === "string" && entry.trim()) {
-    const id = entry.trim();
-    return { id, label: id };
-  }
-  if (!entry || typeof entry !== "object") {
-    return null;
-  }
-  const o = entry as Record<string, unknown>;
-  const id =
-    (typeof o.id === "string" && o.id.trim()) ||
-    (typeof o.model === "string" && o.model.trim()) ||
-    (typeof o.name === "string" && o.name.trim()) ||
-    (typeof o.value === "string" && o.value.trim()) ||
-    "";
-  if (!id) {
-    return null;
-  }
-  const labelRaw =
-    (typeof o.label === "string" && o.label.trim()) ||
-    (typeof o.title === "string" && o.title.trim()) ||
-    (typeof o.displayName === "string" && o.displayName.trim()) ||
-    id;
-  return { id, label: labelRaw };
 }
 
 function getChatbotErrorMessage(error: unknown): string {

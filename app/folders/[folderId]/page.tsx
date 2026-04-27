@@ -434,7 +434,7 @@ export default function FolderPage() {
         {!orderedFiles.length && <li className="text-xs text-slate-500">No files in this folder yet.</li>}
       </ul>
 
-      <DocumentChatWidget />
+      <DocumentChatWidget folderId={folderId} />
     </section>
   );
 }
