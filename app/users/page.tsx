@@ -7,6 +7,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { isAdminUser } from "@/lib/auth-user";
 import { api } from "@/lib/api";
+import { APP_PUBLIC_BASE_URL, APP_USERS_PORTAL_URL } from "@/lib/app-site";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { AppUser } from "@/lib/types";
 
@@ -30,7 +31,15 @@ export default function UsersPage() {
   }, [router, user]);
 
   const createUserMutation = useMutation({
-    mutationFn: async () => api.post("/users/signUp/user", { email, username, password }),
+    mutationFn: async () =>
+      api.post("/users/signUp/user", {
+        email,
+        username,
+        password,
+        sendWelcomeEmail: true,
+        appBaseUrl: APP_PUBLIC_BASE_URL,
+        usersPortalUrl: APP_USERS_PORTAL_URL,
+      }),
     onSuccess: () => {
       setEmail("");
       setUsername("");

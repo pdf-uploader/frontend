@@ -44,7 +44,10 @@ export function PDFViewer({
 }: PDFViewerProps) {
   const MOBILE_BREAKPOINT = 1024;
   const TOUCH_DESKTOP_BREAKPOINT = 1280;
-  const BOOK_PAGE_WIDTH = 520;
+  const BOOK_PAGE_MAX_WIDTH = 520;
+  const BOOK_GRID_GAP_PX = 12;
+  /** Per-spread card chrome (borders + padding) so the PDF width fits two columns. */
+  const DESKTOP_SPREAD_PAGE_FRAME = 20;
   const MOBILE_PAGE_MAX_WIDTH = 700;
   const MIN_ZOOM = 1;
   const MAX_ZOOM = 3;
@@ -83,15 +86,38 @@ export function PDFViewer({
   const isSinglePageFullscreen = isFullscreen && isSinglePageView;
   const isZoomedDocument = pinchZoomScale > MIN_ZOOM;
   const shouldFitToFullscreenHeight = isSinglePageFullscreen && pinchZoomScale <= MIN_ZOOM;
-  const pageWidth = isSinglePageView
-    ? clampNumber(
-        Math.floor(viewportWidth - (isFullscreen ? 8 : 56)),
+  const bookContentWidth = getBookViewportContentWidth(viewportRef.current);
+  /** react-pdf Page width × scale; fullscreen desktop two-page also uses 1.4. */
+  const desktopFullscreenPageScale = isFullscreen && !isSinglePageView ? 1.4 : 1;
+
+  const pageWidth = useMemo(() => {
+    const z = Math.max(pinchZoomScale, 0.01);
+    if (bookContentWidth <= 0) {
+      return BOOK_PAGE_MAX_WIDTH;
+    }
+    if (isSinglePageView) {
+      const sideReserve = isFullscreen ? 8 : 12;
+      return clampNumber(
+        Math.floor((bookContentWidth - sideReserve) / z),
         240,
         isFullscreen ? 1200 : MOBILE_PAGE_MAX_WIDTH
-      )
-    : isFullscreen
-      ? clampNumber(Math.floor((viewportWidth - 8) / 2), 320, 1800)
-      : BOOK_PAGE_WIDTH;
+      );
+    }
+    if (isFullscreen) {
+      return clampNumber(
+        Math.floor((bookContentWidth - 8) / (2 * z * desktopFullscreenPageScale)),
+        320,
+        1800
+      );
+    }
+    return clampNumber(
+      Math.floor(
+        (bookContentWidth - BOOK_GRID_GAP_PX - 2 * DESKTOP_SPREAD_PAGE_FRAME) / (2 * z)
+      ),
+      200,
+      BOOK_PAGE_MAX_WIDTH
+    );
+  }, [bookContentWidth, isSinglePageView, isFullscreen, pinchZoomScale, desktopFullscreenPageScale]);
   const pageHeight = shouldFitToFullscreenHeight ? clampNumber(Math.floor(viewportHeight - 6), 240, 2600) : undefined;
 
   useEffect(() => {
@@ -137,25 +163,41 @@ export function PDFViewer({
   }, [leftPage, onVisiblePagesChange, rightPage]);
 
   useEffect(() => {
-    const updateViewportWidth = () => {
+    const updateBookViewport = () => {
       if (!viewportRef.current) {
         return;
       }
-      setViewportWidth(viewportRef.current.clientWidth);
-      setViewportHeight(viewportRef.current.clientHeight);
+      const el = viewportRef.current;
+      setViewportWidth(el.clientWidth);
+      setViewportHeight(el.clientHeight);
       setIsCoarsePointer(window.matchMedia("(pointer: coarse)").matches);
       setHasTouchInput(window.matchMedia("(hover: none)").matches || navigator.maxTouchPoints > 0);
       setIsStandalonePwa(isStandaloneDisplayMode());
     };
 
-    updateViewportWidth();
-    window.addEventListener("resize", updateViewportWidth);
-    window.addEventListener("orientationchange", updateViewportWidth);
+    updateBookViewport();
+    const el = viewportRef.current;
+    const ro =
+      el &&
+      new ResizeObserver(() => {
+        updateBookViewport();
+      });
+    if (el && ro) {
+      ro.observe(el);
+    }
+    window.addEventListener("resize", updateBookViewport);
+    window.addEventListener("orientationchange", updateBookViewport);
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    vv?.addEventListener("resize", updateBookViewport);
+    vv?.addEventListener("scroll", updateBookViewport);
     return () => {
-      window.removeEventListener("resize", updateViewportWidth);
-      window.removeEventListener("orientationchange", updateViewportWidth);
+      ro?.disconnect();
+      window.removeEventListener("resize", updateBookViewport);
+      window.removeEventListener("orientationchange", updateBookViewport);
+      vv?.removeEventListener("resize", updateBookViewport);
+      vv?.removeEventListener("scroll", updateBookViewport);
     };
-  }, []);
+  }, [fileUrl]);
 
   useEffect(() => {
     if (!isSinglePageView) {
@@ -307,17 +349,17 @@ export function PDFViewer({
           </div>
         </div>
       }
-      className={isFullscreen ? "flex h-full w-full flex-col" : "space-y-4"}
+      className={isFullscreen ? "flex h-full w-full min-w-0 max-w-full flex-col" : "w-full min-w-0 max-w-full space-y-4"}
     >
       <div
         ref={viewportRef}
+        data-pdf-book-viewport
         className={[
-          "relative border",
-          isZoomedDocument ? "touch-auto" : "touch-pan-y",
-          isZoomedDocument ? "overflow-auto" : "overflow-hidden",
+          "pdf-book-viewport relative w-full min-w-0 max-w-full select-none border overflow-x-hidden overflow-y-hidden",
+          !isZoomedDocument ? "touch-pan-y" : "",
           isFullscreen
-            ? "h-full w-full rounded-none border-0 bg-slate-950 p-0"
-            : "mx-auto h-auto max-w-[1120px] rounded-2xl border-slate-200 p-3 shadow-inner lg:h-[760px] lg:p-4",
+            ? "h-full w-full min-h-0 rounded-none border-0 bg-slate-950 p-0"
+            : "mx-auto h-auto w-full min-w-0 max-w-[1120px] rounded-2xl border-slate-200 p-3 shadow-inner lg:h-[760px] lg:p-4",
         ].join(" ")}
         style={{
           WebkitUserSelect: "none",
@@ -450,6 +492,7 @@ export function PDFViewer({
           <div className="pointer-events-none absolute inset-y-0 left-1/2 w-10 -translate-x-1/2 bg-gradient-to-r from-slate-300/25 via-slate-400/30 to-slate-300/25 blur-lg" />
         )}
         <div
+          data-pdf-zoom-controls
           className={[
             "absolute right-3 top-3 z-30 flex items-center gap-1.5 rounded-full border px-1.5 py-1 shadow-sm backdrop-blur",
             isFullscreen ? "border-slate-600 bg-slate-900/85 text-white" : "border-slate-300 bg-white/95 text-slate-800",
@@ -495,7 +538,12 @@ export function PDFViewer({
             +
           </button>
         </div>
-        <div className={["grid grid-cols-1 gap-3 lg:grid-cols-2", isFullscreen ? "h-full w-full gap-0" : ""].join(" ")}>
+        <div
+          className={[
+            "grid min-h-0 w-full min-w-0 max-w-full grid-cols-1 gap-3 overflow-hidden lg:grid-cols-2",
+            isFullscreen ? "h-full min-h-0 gap-0" : "",
+          ].join(" ")}
+        >
           <BookPage
             pageNumber={leftPage}
             isBookmarked={bookmarkedSet.has(leftPage)}
@@ -703,6 +751,7 @@ function BookPage({
 }: BookPageProps) {
   const desktopFullscreenScale = isFullscreen && !isMobileView ? 1.4 : 1;
   const pageSurface = getPageSurfaceStyle(pageTone);
+  const isZoomed = zoomScale > 1;
 
   const renderPdfPage = (pageToRender: number) => {
     let pageKeywordOccurrenceCounter = 0;
@@ -742,15 +791,16 @@ function BookPage({
   return (
     <div
       className={[
-        "group relative flex flex-col overflow-hidden rounded-xl border border-slate-200 p-2 shadow-sm transition hover:shadow-md",
-        isFullscreen ? "h-full rounded-none border-0 p-0 shadow-none" : "",
-        zoomScale > 1 ? "cursor-grab" : isMobileView ? "cursor-default" : isRightPage ? "cursor-e-resize" : "cursor-w-resize",
+        "group relative flex min-w-0 max-w-full flex-col overflow-hidden rounded-xl border border-slate-200 p-2 shadow-sm transition hover:shadow-md",
+        isFullscreen ? "h-full min-h-0 w-full max-w-full rounded-none border-0 p-0 shadow-none" : "",
+        isZoomed && isMobileView
+          ? "cursor-default"
+          : isRightPage
+            ? "cursor-e-resize"
+            : "cursor-w-resize",
       ].join(" ")}
       style={!isFullscreen ? { backgroundColor: pageSurface.pageBodyColor } : undefined}
       onClick={(event) => {
-        if (zoomScale > 1) {
-          return;
-        }
         if (isMobileView) {
           if (isFullscreen) {
             return;
@@ -773,9 +823,6 @@ function BookPage({
       role="button"
       tabIndex={0}
       onKeyDown={(event) => {
-        if (zoomScale > 1) {
-          return;
-        }
         if (isMobileView) {
           return;
         }
@@ -802,7 +849,7 @@ function BookPage({
               ? "h-full min-h-0 p-0"
               : "min-h-[56vh] p-2"
             : isFullscreen
-              ? "min-h-0 flex-1 items-center rounded-none border-0 p-0"
+              ? "min-h-0 w-full min-w-0 max-w-full flex-1 items-center justify-center overflow-hidden rounded-none border-0 p-0"
               : "h-[700px]",
         ].join(" ")}
         style={{
@@ -940,6 +987,16 @@ function getTouchDistance(
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function getBookViewportContentWidth(element: HTMLDivElement | null): number {
+  if (!element) {
+    return 0;
+  }
+  const s = getComputedStyle(element);
+  const pl = parseFloat(s.paddingLeft) || 0;
+  const pr = parseFloat(s.paddingRight) || 0;
+  return Math.max(0, element.clientWidth - pl - pr);
 }
 
 function isStandaloneDisplayMode(): boolean {

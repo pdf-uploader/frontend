@@ -423,7 +423,7 @@ export default function FileViewerPage() {
     >
       <div
         className={[
-          "rounded-xl border p-3 shadow-sm sm:p-4",
+          "min-w-0 max-w-full rounded-xl border p-3 shadow-sm sm:p-4",
           isFullscreen
             ? "relative flex h-full w-full flex-col border-0 bg-slate-950 p-0 shadow-none"
             : "border-slate-200 bg-white",
@@ -717,7 +717,7 @@ export default function FileViewerPage() {
 
         <div
           className={[
-            "rounded-xl border border-slate-200 bg-slate-100 p-2 sm:p-4",
+            "min-w-0 max-w-full overflow-x-clip rounded-xl border border-slate-200 bg-slate-100 p-2 sm:p-4",
             isFullscreen ? "flex min-h-0 flex-1 rounded-none border-0 bg-slate-950 p-0" : "min-h-[58vh] sm:min-h-[70vh]",
           ].join(" ")}
         >

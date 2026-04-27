@@ -16,6 +16,7 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useDebounce } from "use-debounce";
 import axios from "axios";
+import { DocumentChatWidget } from "@/components/document-chat-widget";
 import { isAdminUser } from "@/lib/auth-user";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/use-auth";
@@ -432,6 +433,8 @@ export default function FolderPage() {
         ))}
         {!orderedFiles.length && <li className="text-xs text-slate-500">No files in this folder yet.</li>}
       </ul>
+
+      <DocumentChatWidget />
     </section>
   );
 }

@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { APP_PUBLIC_BASE_URL, APP_USERS_PORTAL_URL } from "@/lib/app-site";
 import { AppUser, Folder } from "@/lib/types";
 
 export function AdminPanel() {
@@ -27,7 +28,15 @@ export function AdminPanel() {
   });
 
   const createUserMutation = useMutation({
-    mutationFn: async () => api.post("/users/signUp/user", { email, username, password }),
+    mutationFn: async () =>
+      api.post("/users/signUp/user", {
+        email,
+        username,
+        password,
+        sendWelcomeEmail: true,
+        appBaseUrl: APP_PUBLIC_BASE_URL,
+        usersPortalUrl: APP_USERS_PORTAL_URL,
+      }),
     onSuccess: () => {
       setEmail("");
       setUsername("");
