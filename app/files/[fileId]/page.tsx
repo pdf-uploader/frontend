@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import axios from "axios";
+import { PdfViewerPageLoading } from "@/components/pdf-loading-ui";
 import { api, createBookmark, deleteBookmark, getBookmarks } from "@/lib/api";
 import { FileDetails } from "@/lib/types";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -13,7 +14,14 @@ import "react-pdf/dist/Page/TextLayer.css";
 
 const PDFViewer = dynamic(() => import("@/components/pdf-viewer").then((mod) => mod.PDFViewer), {
   ssr: false,
-  loading: () => <p className="text-sm text-slate-600">Loading PDF viewer...</p>,
+  loading: () => (
+    <div className="rounded-xl border border-slate-200/90 bg-slate-50/80 px-4 py-6 text-center">
+      <p className="text-sm font-medium text-slate-600">Preparing viewer…</p>
+      <div className="mx-auto mt-3 h-1.5 max-w-[200px] overflow-hidden rounded-full bg-slate-200">
+        <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-500/80" />
+      </div>
+    </div>
+  ),
 });
 
 type BookmarkColorId = "silver" | "sand" | "ice" | "sage";
@@ -65,6 +73,10 @@ export default function FileViewerPage() {
   const [isTouchLikeInput, setIsTouchLikeInput] = useState(false);
   const [visiblePages, setVisiblePages] = useState<number[]>([]);
   const [bookmarkTargetPage, setBookmarkTargetPage] = useState<number | null>(null);
+  const [pdfDownloadProgress, setPdfDownloadProgress] = useState<{ loaded: number; total: number | null }>({
+    loaded: 0,
+    total: null,
+  });
   const viewerSectionRef = useRef<HTMLElement | null>(null);
   const lastTapTimeRef = useRef(0);
   const hideFullscreenMenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -78,7 +90,23 @@ export default function FileViewerPage() {
 
   const pdfBlobQuery = useQuery({
     queryKey: ["file-pdf", fileId],
-    queryFn: async () => (await api.get<Blob>(`/files/pdf/${fileId}`, { responseType: "blob" })).data,
+    queryFn: async ({ signal }) => {
+      setPdfDownloadProgress({ loaded: 0, total: null });
+      const res = await api.get<Blob>(`/files/pdf/${fileId}`, {
+        responseType: "blob",
+        signal,
+        onDownloadProgress: (event) => {
+          if (signal.aborted) {
+            return;
+          }
+          const total = event.total && event.total > 0 ? event.total : null;
+          setPdfDownloadProgress({ loaded: event.loaded, total });
+        },
+      });
+      const blob = res.data;
+      setPdfDownloadProgress({ loaded: blob.size, total: blob.size });
+      return blob;
+    },
     enabled: Boolean(fileId),
   });
 
@@ -259,11 +287,13 @@ export default function FileViewerPage() {
 
   if (fileQuery.isLoading || pdfBlobQuery.isLoading) {
     return (
-      <section className="mx-auto w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="mb-3 text-sm font-medium text-slate-700">Loading file...</p>
-        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
-          <div className="h-full w-1/3 rounded-full bg-blue-600 animate-pulse" />
-        </div>
+      <section className="mx-auto w-full max-w-2xl py-8">
+        <PdfViewerPageLoading
+          fileMetadataLoaded={fileQuery.isSuccess}
+          pdfDownloading={pdfBlobQuery.isFetching}
+          filename={fileQuery.data?.filename}
+          progress={pdfDownloadProgress}
+        />
       </section>
     );
   }
