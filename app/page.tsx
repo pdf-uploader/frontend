@@ -4,17 +4,20 @@ import { useEffect, useState } from "react";
 import { BrandedBottomConsultants } from "@/components/branded-logos-shell";
 import { FolderBrowser } from "@/components/folder-browser";
 import { HomeScrollSequence } from "@/components/home-scroll-sequence";
+import { hasAuthSession } from "@/lib/auth-session";
 import { useAuth } from "@/lib/hooks/use-auth";
 
 export default function HomePage() {
-  const { token } = useAuth();
+  const auth = useAuth();
   const [isHydrated, setIsHydrated] = useState(false);
 
   useEffect(() => {
     setIsHydrated(true);
   }, []);
 
-  if (!isHydrated || !token) {
+  const isLoggedIn = hasAuthSession(auth);
+
+  if (!isHydrated || !isLoggedIn) {
     return <HomeScrollSequence loginHref="/login" />;
   }
 

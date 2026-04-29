@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import { signOut } from "@/lib/api";
+import { hasAuthSession } from "@/lib/auth-session";
 import { isAdminUser } from "@/lib/auth-user";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { BrandedSystemNavbarTitle } from "@/components/branded-logos-shell";
@@ -13,7 +14,8 @@ import { KOICA_WEBSITE_URL, MOWT_WEBSITE_URL } from "@/lib/branding-links";
 export function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, token } = useAuth();
+  const auth = useAuth();
+  const { user, token } = auth;
   const isUsersRoute = pathname.startsWith("/users");
   const canManageUsers = isAdminUser(user);
   const roleLabel = canManageUsers ? "ADMIN" : "USER";
@@ -25,7 +27,7 @@ export function Navbar() {
     },
   });
 
-  if (!token) {
+  if (!hasAuthSession(auth)) {
     return null;
   }
 

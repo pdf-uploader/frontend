@@ -1,28 +1,40 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { isAdminUser } from "@/lib/auth-user";
-import { api } from "@/lib/api";
+import { api, patchUserStatus, signUpApplicantUser } from "@/lib/api";
 import { APP_PUBLIC_BASE_URL, APP_USERS_PORTAL_URL } from "@/lib/app-site";
 import { useAuth } from "@/lib/hooks/use-auth";
-import { AppUser } from "@/lib/types";
+import { parseUserStatus } from "@/lib/user-status";
+import { AppUser, UserStatus } from "@/lib/types";
 
 export default function UsersPage() {
   const router = useRouter();
   const { user, token } = useAuth();
   const [email, setEmail] = useState("");
-  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isCreatePasswordHidden, setIsCreatePasswordHidden] = useState(true);
   const [visibleUserPasswords, setVisibleUserPasswords] = useState<Record<string, boolean>>({});
+  const [statusFilter, setStatusFilter] = useState<"ALL" | UserStatus>("ALL");
   const usersQuery = useQuery({
     queryKey: ["users"],
     queryFn: async () => (await api.get<AppUser[]>("/users")).data,
   });
+
+  const displayedUsers = useMemo(() => {
+    const rows = usersQuery.data ?? [];
+    if (statusFilter === "ALL") {
+      return rows;
+    }
+    return rows.filter((row) => {
+      const s = parseUserStatus(row.status) ?? "WAITING";
+      return s === statusFilter;
+    });
+  }, [usersQuery.data, statusFilter]);
 
   useEffect(() => {
     if (user && !isAdminUser(user)) {
@@ -32,9 +44,8 @@ export default function UsersPage() {
 
   const createUserMutation = useMutation({
     mutationFn: async () =>
-      api.post("/users/signUp/user", {
+      signUpApplicantUser({
         email,
-        username,
         password,
         sendWelcomeEmail: true,
         appBaseUrl: APP_PUBLIC_BASE_URL,
@@ -42,13 +53,20 @@ export default function UsersPage() {
       }),
     onSuccess: () => {
       setEmail("");
-      setUsername("");
       setPassword("");
       void usersQuery.refetch();
     },
   });
   const deleteUserMutation = useMutation({
     mutationFn: async (userId: string) => api.delete(`/users/${userId}`),
+    onSuccess: () => {
+      void usersQuery.refetch();
+    },
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ userId, status }: { userId: string; status: UserStatus }) =>
+      patchUserStatus(userId, status),
     onSuccess: () => {
       void usersQuery.refetch();
     },
@@ -104,13 +122,6 @@ export default function UsersPage() {
           className="ui-input"
           required
         />
-        <input
-          value={username}
-          onChange={(event) => setUsername(event.target.value)}
-          placeholder="Username"
-          className="ui-input"
-          required
-        />
         <div className="relative">
           <input
             type={isCreatePasswordHidden ? "password" : "text"}
@@ -156,28 +167,68 @@ export default function UsersPage() {
       {createUserMutation.isSuccess && <p className="text-sm text-green-700">User created successfully.</p>}
       {createUserMutation.error && <p className="text-sm text-red-600">{createUserErrorMessage}</p>}
       <section className="ui-card space-y-3 p-5">
-        <h2 className="text-base font-semibold text-slate-900">All Users</h2>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-base font-semibold text-slate-900">All Users</h2>
+          {usersQuery.data && usersQuery.data.length > 0 && (
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <span className="shrink-0">Filter by status</span>
+              <select
+                className="ui-input max-w-[11rem] py-1.5 text-sm"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as "ALL" | UserStatus)}
+              >
+                <option value="ALL">All statuses</option>
+                <option value="WAITING">WAITING</option>
+                <option value="APPROVED">APPROVED</option>
+                <option value="REJECTED">REJECTED</option>
+              </select>
+            </label>
+          )}
+        </div>
         {usersQuery.isLoading && <p className="text-sm text-slate-600">Loading users...</p>}
         {usersQuery.error && <p className="text-sm text-red-600">{getBackendErrorMessage(usersQuery.error)}</p>}
         {usersQuery.data && usersQuery.data.length === 0 && <p className="text-sm text-slate-600">No users found.</p>}
-        {usersQuery.data && usersQuery.data.length > 0 && (
+        {usersQuery.data && usersQuery.data.length > 0 && displayedUsers.length === 0 && (
+          <p className="text-sm text-slate-600">No users match this status filter.</p>
+        )}
+        {displayedUsers.length > 0 && (
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-slate-700">
                   <th className="px-2 py-2 font-semibold">Email</th>
-                  <th className="px-2 py-2 font-semibold">Username</th>
                   <th className="px-2 py-2 font-semibold">Role</th>
+                  <th className="px-2 py-2 font-semibold">Status</th>
                   <th className="px-2 py-2 font-semibold">Password</th>
                   <th className="px-2 py-2 font-semibold">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {usersQuery.data.map((listedUser) => (
+                {displayedUsers.map((listedUser) => (
                   <tr key={listedUser.id} className="border-b border-slate-100 text-slate-700">
                     <td className="px-2 py-2">{listedUser.email || "-"}</td>
-                    <td className="px-2 py-2">{listedUser.username || "-"}</td>
                     <td className="px-2 py-2">{listedUser.role || "-"}</td>
+                    <td className="px-2 py-2">
+                      <select
+                        className="ui-input max-w-[11rem] py-1.5 text-xs"
+                        value={parseUserStatus(listedUser.status) ?? "WAITING"}
+                        onChange={(event) =>
+                          updateStatusMutation.mutate({
+                            userId: listedUser.id,
+                            status: event.target.value as UserStatus,
+                          })
+                        }
+                        disabled={
+                          updateStatusMutation.isPending &&
+                          updateStatusMutation.variables?.userId === listedUser.id
+                        }
+                        aria-label={`Set status for ${listedUser.email}`}
+                      >
+                        <option value="WAITING">WAITING</option>
+                        <option value="APPROVED">APPROVED</option>
+                        <option value="REJECTED">REJECTED</option>
+                      </select>
+                    </td>
                     <td className="px-2 py-2">
                       {(() => {
                         const userPassword = listedUser.password ?? listedUser.passwordHash ?? "";
@@ -217,7 +268,7 @@ export default function UsersPage() {
                       <button
                         type="button"
                         onClick={() => deleteUserMutation.mutate(listedUser.id)}
-                        aria-label={`Delete user ${listedUser.email ?? listedUser.username ?? listedUser.id}`}
+                        aria-label={`Delete user ${listedUser.email ?? listedUser.id}`}
                         title="Delete user"
                         disabled={deleteUserMutation.isPending}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-md text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -238,6 +289,9 @@ export default function UsersPage() {
           </div>
         )}
         {deleteUserMutation.error && <p className="text-sm text-red-600">{getBackendErrorMessage(deleteUserMutation.error)}</p>}
+        {updateStatusMutation.error && (
+          <p className="text-sm text-red-600">{getBackendErrorMessage(updateStatusMutation.error)}</p>
+        )}
       </section>
     </section>
   );

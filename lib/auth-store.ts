@@ -1,15 +1,24 @@
 import { authUserFromAccessToken, normalizeAuthUser } from "@/lib/auth-user";
 import { AuthUser } from "@/lib/types";
+import { ACCESS_TOKEN_COOKIE, getBrowserCookie, REFRESH_TOKEN_COOKIE } from "@/lib/auth-cookies";
+import { isLoginBlockedAccountStatus } from "@/lib/user-status";
 
 const ACCESS_TOKEN_KEY = "pdf_manager_access_token";
+const REFRESH_TOKEN_KEY = "pdf_manager_refresh_token";
 const USER_KEY = "pdf_manager_user";
 const CSRF_KEY = "pdf_manager_csrf";
 
 let accessToken: string | null = null;
+let refreshToken: string | null = null;
 let csrfToken: string | null = null;
 let currentUser: AuthUser | null = null;
-let snapshot: { token: string | null; user: AuthUser | null } = {
+let snapshot: {
+  token: string | null;
+  refreshToken: string | null;
+  user: AuthUser | null;
+} = {
   token: null,
+  refreshToken: null,
   user: null,
 };
 
@@ -22,6 +31,7 @@ function emit(): void {
 function updateSnapshot(): void {
   snapshot = {
     token: accessToken,
+    refreshToken,
     user: currentUser,
   };
 }
@@ -35,6 +45,12 @@ function persist() {
     window.sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
   } else {
     window.sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+  }
+
+  if (refreshToken) {
+    window.sessionStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  } else {
+    window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
   }
 
   if (csrfToken) {
@@ -55,7 +71,14 @@ export const authStore = {
     if (typeof window === "undefined") {
       return;
     }
-    accessToken = window.sessionStorage.getItem(ACCESS_TOKEN_KEY);
+    accessToken =
+      window.sessionStorage.getItem(ACCESS_TOKEN_KEY) ??
+      getBrowserCookie(ACCESS_TOKEN_COOKIE) ??
+      null;
+    refreshToken =
+      window.sessionStorage.getItem(REFRESH_TOKEN_KEY) ??
+      getBrowserCookie(REFRESH_TOKEN_COOKIE) ??
+      null;
     csrfToken = window.sessionStorage.getItem(CSRF_KEY) ?? readCookie("csrfValue");
     const userRaw = window.sessionStorage.getItem(USER_KEY);
     if (userRaw) {
@@ -70,10 +93,22 @@ export const authStore = {
     if (!currentUser && accessToken) {
       currentUser = authUserFromAccessToken(accessToken);
     }
+
+    if (isLoginBlockedAccountStatus(currentUser?.status)) {
+      accessToken = null;
+      refreshToken = null;
+      csrfToken = null;
+      currentUser = null;
+      window.sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+      window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+      window.sessionStorage.removeItem(USER_KEY);
+      window.sessionStorage.removeItem(CSRF_KEY);
+    }
+
     updateSnapshot();
     emit();
   },
-  getSnapshot(): { token: string | null; user: AuthUser | null } {
+  getSnapshot(): { token: string | null; refreshToken: string | null; user: AuthUser | null } {
     return snapshot;
   },
   getAccessToken(): string | null {
@@ -81,6 +116,15 @@ export const authStore = {
   },
   setAccessToken(token: string | null): void {
     accessToken = token;
+    updateSnapshot();
+    persist();
+    emit();
+  },
+  getRefreshToken(): string | null {
+    return refreshToken;
+  },
+  setRefreshToken(token: string | null): void {
+    refreshToken = token;
     updateSnapshot();
     persist();
     emit();
@@ -104,6 +148,7 @@ export const authStore = {
   },
   clear(): void {
     accessToken = null;
+    refreshToken = null;
     csrfToken = null;
     currentUser = null;
     updateSnapshot();

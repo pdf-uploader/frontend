@@ -2,14 +2,15 @@
 
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, patchUserStatus, signUpApplicantUser } from "@/lib/api";
 import { APP_PUBLIC_BASE_URL, APP_USERS_PORTAL_URL } from "@/lib/app-site";
-import { AppUser, Folder } from "@/lib/types";
+import { parseUserStatus } from "@/lib/user-status";
+import { UserStatusBadge } from "@/components/user-status-badge";
+import { AppUser, Folder, UserStatus } from "@/lib/types";
 
 export function AdminPanel() {
   const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
-  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [folderName, setFolderName] = useState("");
@@ -29,9 +30,8 @@ export function AdminPanel() {
 
   const createUserMutation = useMutation({
     mutationFn: async () =>
-      api.post("/users/signUp/user", {
+      signUpApplicantUser({
         email,
-        username,
         password,
         sendWelcomeEmail: true,
         appBaseUrl: APP_PUBLIC_BASE_URL,
@@ -39,7 +39,6 @@ export function AdminPanel() {
       }),
     onSuccess: () => {
       setEmail("");
-      setUsername("");
       setPassword("");
       queryClient.invalidateQueries({ queryKey: ["users"] });
     },
@@ -47,6 +46,12 @@ export function AdminPanel() {
 
   const deleteUserMutation = useMutation({
     mutationFn: async (id: string) => api.delete(`/users/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ userId, status }: { userId: string; status: UserStatus }) =>
+      patchUserStatus(userId, status),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
   });
 
@@ -103,11 +108,10 @@ export function AdminPanel() {
         <h3 className="text-base font-semibold">Create User</h3>
         <form className="space-y-3" onSubmit={submitCreateUser}>
           <input className="w-full rounded border p-2 text-sm" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className="w-full rounded border p-2 text-sm" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
           <input className="w-full rounded border p-2 text-sm" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
           <button
             className="rounded bg-blue-600 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={createUserMutation.isPending || !email || !username || !password}
+            disabled={createUserMutation.isPending || !email || !password}
           >
             Create
           </button>
@@ -133,10 +137,29 @@ export function AdminPanel() {
             return (
               <li key={user.id} className="flex items-start justify-between rounded border border-slate-200 p-2">
                 <div className="pr-2">
-                  <span>
-                    {user.email}
-                    {user.username ? <span className="ml-2 text-xs text-slate-500">({user.username})</span> : null}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>{user.email}</span>
+                    <UserStatusBadge status={user.status} />
+                    <select
+                      className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800"
+                      value={parseUserStatus(user.status) ?? "WAITING"}
+                      onChange={(e) =>
+                        updateStatusMutation.mutate({
+                          userId: user.id,
+                          status: e.target.value as UserStatus,
+                        })
+                      }
+                      disabled={
+                        updateStatusMutation.isPending &&
+                        updateStatusMutation.variables?.userId === user.id
+                      }
+                      aria-label={`Set status for ${user.email}`}
+                    >
+                      <option value="WAITING">WAITING</option>
+                      <option value="APPROVED">APPROVED</option>
+                      <option value="REJECTED">REJECTED</option>
+                    </select>
+                  </div>
                   <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
                     <span>Password: {passwordText}</span>
                     {userPassword ? (
