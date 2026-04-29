@@ -1,17 +1,12 @@
 /**
  * Social login entry URLs (backend OAuth redirects).
  * Express: `GET /auth/google` → `passport.authenticate("google", …)`.
+ * When `NEXT_PUBLIC_AUTH_GOOGLE_URL` is unset, the UI shows a disabled placeholder (same pattern as WhatsApp).
  */
 
-const API_BASE = (process.env.NEXT_PUBLIC_EXPRESS_SERVER_URL ?? "http://localhost:4000").replace(/\/$/, "");
-
-export function getGoogleOAuthStartUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_AUTH_GOOGLE_URL?.trim();
-  if (configured) {
-    return configured;
-  }
-  /** Matches `authRouter.get("/google", passport.authenticate("google", …))` mounted at `/auth`. */
-  return `${API_BASE}/auth/google`;
+export function getGoogleAuthUrl(): string | null {
+  const configured = process.env.NEXT_PUBLIC_AUTH_GOOGLE_URL?.trim() ?? "";
+  return configured.length > 0 ? configured : null;
 }
 
 /** WhatsApp invite or OAuth-style URL; when absent the UI shows a disabled placeholder. */

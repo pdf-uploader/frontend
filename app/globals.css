@@ -163,3 +163,74 @@ a {
 .logo-float {
   animation: logoFloat 4s ease-in-out infinite;
 }
+
+/** Sign-up password field: brief red pulse when submit blocked by validation */
+@keyframes signup-password-input-blink {
+  0%,
+  100% {
+    border-color: rgb(251 113 133);
+    box-shadow: 0 0 0 2px rgb(251 113 133 / 0.45);
+  }
+  50% {
+    border-color: rgb(220 38 38);
+    box-shadow: 0 0 0 5px rgb(248 113 113 / 0.22);
+  }
+}
+
+.signup-password-input-blink {
+  animation: signup-password-input-blink 0.45s ease-in-out 4;
+}
+
+/** Sign-up success badge — mint circle pops in; check draws via WAAPI + CSS fallback in `SignupSuccessCheck` */
+@keyframes signup-success-mark-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.signup-success-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background-color: #d4f8e6;
+}
+
+.signup-success-mark-pop {
+  animation: signup-success-mark-pop 0.48s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.signup-success-check-path {
+  stroke: #006b4d;
+}
+
+/** Fallback when `SVGElement.animate` is missing — `--signup-dash` set in JS from path length */
+@keyframes signup-success-check-draw-fallback {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.signup-success-check-path-css-fallback {
+  stroke-dasharray: var(--signup-dash);
+  stroke-dashoffset: var(--signup-dash);
+  animation: signup-success-check-draw-fallback 1667ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signup-success-mark-pop {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .signup-success-check-path-css-fallback {
+    animation: none;
+    stroke-dashoffset: 0 !important;
+  }
+}

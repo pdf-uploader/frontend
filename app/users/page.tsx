@@ -11,6 +11,7 @@ import { APP_PUBLIC_BASE_URL, APP_USERS_PORTAL_URL } from "@/lib/app-site";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { parseUserStatus } from "@/lib/user-status";
 import { AppUser, UserStatus } from "@/lib/types";
+import { DeleteUserConfirmDialog } from "@/components/delete-user-confirm-dialog";
 
 export default function UsersPage() {
   const router = useRouter();
@@ -21,6 +22,7 @@ export default function UsersPage() {
   const [isCreatePasswordHidden, setIsCreatePasswordHidden] = useState(true);
   const [visibleUserPasswords, setVisibleUserPasswords] = useState<Record<string, boolean>>({});
   const [statusFilter, setStatusFilter] = useState<"ALL" | UserStatus>("ALL");
+  const [userPendingDelete, setUserPendingDelete] = useState<AppUser | null>(null);
   const usersQuery = useQuery({
     queryKey: ["users"],
     queryFn: async () => (await api.get<AppUser[]>("/users")).data,
@@ -64,6 +66,7 @@ export default function UsersPage() {
     mutationFn: async (userId: string) => api.delete(`/users/${userId}`),
     onSuccess: () => {
       void usersQuery.refetch();
+      setUserPendingDelete(null);
     },
   });
 
@@ -166,7 +169,7 @@ export default function UsersPage() {
           </button>
         </div>
         <p className="text-xs text-slate-600">
-          Password must be at least 8 characters and include 1 special character and 1 uppercase letter.
+          Password must be at least 8 characters and include one uppercase letter, one lowercase letter, one number, and a special character (e.g. *&!).
         </p>
 
         <button
@@ -280,7 +283,7 @@ export default function UsersPage() {
                     <td className="px-2 py-2">
                       <button
                         type="button"
-                        onClick={() => deleteUserMutation.mutate(listedUser.id)}
+                        onClick={() => setUserPendingDelete(listedUser)}
                         aria-label={`Delete user ${listedUser.email ?? listedUser.id}`}
                         title="Delete user"
                         disabled={deleteUserMutation.isPending}
@@ -302,6 +305,23 @@ export default function UsersPage() {
           </div>
         )}
         {deleteUserMutation.error && <p className="text-sm text-red-600">{getBackendErrorMessage(deleteUserMutation.error, "Failed to delete user.")}</p>}
+        <DeleteUserConfirmDialog
+          open={userPendingDelete !== null}
+          displayLabel={
+            userPendingDelete?.email?.trim() ||
+            (userPendingDelete?.username?.trim() ? `@${userPendingDelete.username.trim()}` : "") ||
+            userPendingDelete?.id ||
+            ""
+          }
+          onCancel={() => setUserPendingDelete(null)}
+          onConfirm={() => {
+            if (!userPendingDelete) {
+              return;
+            }
+            deleteUserMutation.mutate(userPendingDelete.id);
+          }}
+          pending={deleteUserMutation.isPending}
+        />
         {updateStatusMutation.error && (
           <p className="text-sm text-red-600">{getBackendErrorMessage(updateStatusMutation.error, "Failed to update status.")}</p>
         )}

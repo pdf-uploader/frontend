@@ -1,6 +1,6 @@
 "use client";
 
-import { getGoogleOAuthStartUrl, getWhatsAppAuthUrl } from "@/lib/social-auth-urls";
+import { getGoogleAuthUrl, getWhatsAppAuthUrl } from "@/lib/social-auth-urls";
 
 type Mode = "signin" | "signup";
 
@@ -46,7 +46,7 @@ function WhatsAppGlyph({ className }: { className?: string }) {
 }
 
 export function SocialAuthButtons({ mode, variant = "light" }: SocialAuthButtonsProps) {
-  const googleHref = getGoogleOAuthStartUrl();
+  const googleHref = getGoogleAuthUrl();
   const whatsappHref = getWhatsAppAuthUrl();
 
   const googleLabel =
@@ -78,10 +78,43 @@ export function SocialAuthButtons({ mode, variant = "light" }: SocialAuthButtons
 
   return (
     <div className="flex flex-col gap-3">
-      <a href={googleHref} className={googleBtn} aria-label={googleLabel}>
-        <GoogleGlyph className="h-5 w-5 shrink-0" />
-        <span>{googleLabel}</span>
-      </a>
+      {googleHref ? (
+        <a href={googleHref} className={googleBtn} aria-label={googleLabel}>
+          <GoogleGlyph className="h-5 w-5 shrink-0" />
+          <span>{googleLabel}</span>
+        </a>
+      ) : (
+        <button
+          type="button"
+          disabled
+          className={waDisabledBtn}
+          title="Set NEXT_PUBLIC_AUTH_GOOGLE_URL in env to enable this."
+          aria-label="Google sign-in requires configuration"
+        >
+          <span
+            className={[
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
+              variant === "dark" ? "bg-white/10" : "bg-slate-200/80",
+            ].join(" ")}
+          >
+            <GoogleGlyph className="h-5 w-5 shrink-0" />
+          </span>
+          <span className="flex flex-col items-start gap-0.5">
+            <span className={variant === "dark" ? "font-medium text-white/85" : "font-medium text-slate-700"}>
+              {googleLabel}
+            </span>
+            <span
+              className={
+                variant === "dark"
+                  ? "text-[10px] font-normal leading-tight text-white/45"
+                  : "text-[10px] font-normal leading-tight text-slate-500"
+              }
+            >
+              Not configured for this deployment
+            </span>
+          </span>
+        </button>
+      )}
 
       {whatsappHref ? (
         <a href={whatsappHref} className={waBtn} aria-label={whatsappLabel}>

@@ -6,6 +6,7 @@ import { api, patchUserStatus, signUpApplicantUser } from "@/lib/api";
 import { APP_PUBLIC_BASE_URL, APP_USERS_PORTAL_URL } from "@/lib/app-site";
 import { parseUserStatus } from "@/lib/user-status";
 import { UserStatusBadge } from "@/components/user-status-badge";
+import { DeleteUserConfirmDialog } from "@/components/delete-user-confirm-dialog";
 import { AppUser, Folder, UserStatus } from "@/lib/types";
 
 export function AdminPanel() {
@@ -18,6 +19,7 @@ export function AdminPanel() {
   const [createFolderLock, setCreateFolderLock] = useState(false);
   const [uploadFolderId, setUploadFolderId] = useState("");
   const [filesToUpload, setFilesToUpload] = useState<FileList | null>(null);
+  const [userPendingDelete, setUserPendingDelete] = useState<AppUser | null>(null);
 
   const usersQuery = useQuery({
     queryKey: ["users"],
@@ -49,7 +51,10 @@ export function AdminPanel() {
 
   const deleteUserMutation = useMutation({
     mutationFn: async (id: string) => api.delete(`/users/${id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      setUserPendingDelete(null);
+    },
   });
 
   const updateStatusMutation = useMutation({
@@ -106,7 +111,8 @@ export function AdminPanel() {
   const getUserPassword = (user: AppUser) => user.password ?? user.passwordHash ?? "";
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <>
+      <div className="grid gap-6 lg:grid-cols-2">
       <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5">
         <h3 className="text-base font-semibold">Create User</h3>
         <form className="space-y-3" onSubmit={submitCreateUser}>
@@ -202,7 +208,12 @@ export function AdminPanel() {
                     ) : null}
                   </div>
                 </div>
-                <button onClick={() => deleteUserMutation.mutate(user.id)} className="text-xs text-red-600">
+                <button
+                  type="button"
+                  onClick={() => setUserPendingDelete(user)}
+                  disabled={deleteUserMutation.isPending}
+                  className="text-xs text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
                   Delete
                 </button>
               </li>
@@ -270,5 +281,24 @@ export function AdminPanel() {
         </ul>
       </section>
     </div>
+
+    <DeleteUserConfirmDialog
+      open={userPendingDelete !== null}
+      displayLabel={
+        userPendingDelete?.email?.trim() ||
+        (userPendingDelete?.username?.trim() ? `@${userPendingDelete.username.trim()}` : "") ||
+        userPendingDelete?.id ||
+        ""
+      }
+      onCancel={() => setUserPendingDelete(null)}
+      onConfirm={() => {
+        if (!userPendingDelete) {
+          return;
+        }
+        deleteUserMutation.mutate(userPendingDelete.id);
+      }}
+      pending={deleteUserMutation.isPending}
+    />
+    </>
   );
 }

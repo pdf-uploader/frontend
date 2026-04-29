@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import axios from "axios";
 import Link from "next/link";
@@ -12,18 +12,6 @@ import { AuthProviderDivider, SocialAuthButtons } from "@/components/social-auth
 import { SignInBlockedByAccountStatusError } from "@/lib/sign-in-errors";
 
 const AUTH_CHECK_EMAIL_DISABLED = process.env.NEXT_PUBLIC_AUTH_CHECK_EMAIL_DISABLED === "true";
-
-function RegisteredBanner() {
-  const searchParams = useSearchParams();
-  if (searchParams.get("registered") !== "1") {
-    return null;
-  }
-  return (
-    <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center text-[13px] leading-snug text-emerald-900">
-      Account created. Once an administrator approves your access, sign in with the email and password you chose.
-    </div>
-  );
-}
 
 type AuthStep = "email" | "password";
 
@@ -110,9 +98,6 @@ export default function LoginPage() {
               </svg>
             </Link>
           </div>
-          <Suspense fallback={null}>
-            <RegisteredBanner />
-          </Suspense>
           <div className="mb-8 text-center">
             <h1 className="text-[1.6rem] font-semibold tracking-tight text-slate-900 sm:text-[1.8rem]">
               {step === "email" ? "Sign in or sign up" : "Welcome back"}
