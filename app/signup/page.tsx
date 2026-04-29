@@ -1,102 +1,67 @@
 "use client";
 
-import { FormEvent, Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import axios from "axios";
 import Link from "next/link";
-import { getBackendErrorMessage } from "@/lib/api-errors";
-import { checkEmailRegisteredForLogin, signIn } from "@/lib/api";
+import { signUp } from "@/lib/api";
 import { AuthBrandedShell, AuthPageFooterLinks } from "@/components/auth-branded-shell";
 import { AuthProviderDivider, SocialAuthButtons } from "@/components/social-auth-buttons";
-import { SignInBlockedByAccountStatusError } from "@/lib/sign-in-errors";
-
-const AUTH_CHECK_EMAIL_DISABLED = process.env.NEXT_PUBLIC_AUTH_CHECK_EMAIL_DISABLED === "true";
-
-function RegisteredBanner() {
-  const searchParams = useSearchParams();
-  if (searchParams.get("registered") !== "1") {
-    return null;
-  }
-  return (
-    <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center text-[13px] leading-snug text-emerald-900">
-      Account created. Once an administrator approves your access, sign in with the email and password you chose.
-    </div>
-  );
-}
 
 type AuthStep = "email" | "password";
 
-export default function LoginPage() {
+export default function SignUpPage() {
   const router = useRouter();
   const [step, setStep] = useState<AuthStep>("email");
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isPasswordHidden, setIsPasswordHidden] = useState(true);
-  const [emailLookupError, setEmailLookupError] = useState("");
 
-  const checkEmailMutation = useMutation({
-    mutationFn: (addr: string) => checkEmailRegisteredForLogin(addr),
+  const signUpMutation = useMutation({
+    mutationFn: async () => signUp(email.trim(), password, username.trim()),
+    onSuccess: () => router.replace("/login?registered=1"),
   });
 
-  const loginMutation = useMutation({
-    mutationFn: async () => signIn(email.trim(), password),
-    onSuccess: () => router.replace("/"),
-  });
-
-  const onSubmitEmail = async (event: FormEvent<HTMLFormElement>) => {
+  const onSubmitEmail = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const trimmed = email.trim();
-    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    const trimmedEmail = email.trim();
+    const trimmedUser = username.trim();
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
       return;
     }
-    setEmailLookupError("");
-
-    if (AUTH_CHECK_EMAIL_DISABLED) {
-      setEmail(trimmed);
-      setStep("password");
+    if (!trimmedUser) {
       return;
     }
-
-    try {
-      const exists = await checkEmailMutation.mutateAsync(trimmed);
-      if (!exists) {
-        setEmailLookupError("There is no account for this email.");
-        return;
-      }
-      setEmail(trimmed);
-      setStep("password");
-    } catch (error) {
-      setEmailLookupError(getBackendErrorMessage(error, "Could not verify this email. Try again."));
-    }
+    setEmail(trimmedEmail);
+    setUsername(trimmedUser);
+    setStep("password");
   };
 
   const onSubmitPassword = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    loginMutation.mutate();
+    signUpMutation.mutate();
   };
 
-  const loginErrorMessage = (() => {
-    if (!loginMutation.error) {
+  const errorMessage = (() => {
+    if (!signUpMutation.error) {
       return "";
     }
-    if (loginMutation.error instanceof SignInBlockedByAccountStatusError) {
-      return loginMutation.error.message;
-    }
-    if (axios.isAxiosError(loginMutation.error)) {
+    if (axios.isAxiosError(signUpMutation.error)) {
       const apiMessage =
-        (loginMutation.error.response?.data as { message?: string } | undefined)?.message ??
-        loginMutation.error.message;
-      return apiMessage || "Login failed. Check credentials and try again.";
+        (signUpMutation.error.response?.data as { message?: string } | undefined)?.message ??
+        signUpMutation.error.message;
+      return apiMessage || "Could not create account. Try again.";
     }
-    if (loginMutation.error instanceof Error) {
-      return loginMutation.error.message || "Login failed. Check credentials and try again.";
+    if (signUpMutation.error instanceof Error) {
+      return signUpMutation.error.message || "Could not create account. Try again.";
     }
-    return "Login failed. Check credentials and try again.";
+    return "Could not create account. Try again.";
   })();
 
   return (
-    <AuthBrandedShell>
+    <AuthBrandedShell authHighlight="signup">
       <div className="flex flex-1 flex-col items-center justify-center px-4 pb-4 pt-6 sm:px-6 sm:pb-10 sm:pt-10">
         <div className="auth-openai-panel">
           <div className="mb-5 flex justify-end sm:mb-4">
@@ -110,63 +75,62 @@ export default function LoginPage() {
               </svg>
             </Link>
           </div>
-          <Suspense fallback={null}>
-            <RegisteredBanner />
-          </Suspense>
           <div className="mb-8 text-center">
             <h1 className="text-[1.6rem] font-semibold tracking-tight text-slate-900 sm:text-[1.8rem]">
-              {step === "email" ? "Sign in or sign up" : "Welcome back"}
+              {step === "email" ? "Create your account" : "Choose a password"}
             </h1>
             <p className="mt-2.5 text-[15px] leading-relaxed text-slate-600">
               {step === "email"
-                ? "Continue with Google or enter your work email to access the integrated manual workspace."
-                : `Enter your password for ${email}`}
+                ? "Use Google or your email. Access may require administrator approval."
+                : `Create a secure password for ${email}`}
             </p>
           </div>
 
           {step === "email" && (
             <>
-              <SocialAuthButtons mode="signin" />
+              <SocialAuthButtons mode="signup" />
               <AuthProviderDivider label="or" />
               <form onSubmit={onSubmitEmail} className="space-y-5">
-                <label className="sr-only" htmlFor="login-email">
+                <label className="sr-only" htmlFor="signup-email">
                   Email address
                 </label>
                 <input
-                  id="login-email"
+                  id="signup-email"
                   type="email"
                   autoComplete="email"
                   value={email}
-                  onChange={(event) => {
-                    setEmail(event.target.value);
-                    setEmailLookupError("");
-                  }}
+                  onChange={(event) => setEmail(event.target.value)}
                   placeholder="Email address"
                   className="auth-openai-input"
                   required
                 />
-                <button
-                  type="submit"
-                  disabled={checkEmailMutation.isPending}
-                  className="auth-openai-btn-primary"
-                >
-                  {checkEmailMutation.isPending ? "Checking…" : "Continue"}
+                <label className="sr-only" htmlFor="signup-username">
+                  Username
+                </label>
+                <input
+                  id="signup-username"
+                  type="text"
+                  autoComplete="username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder="Username"
+                  className="auth-openai-input"
+                  required
+                  minLength={2}
+                  maxLength={64}
+                />
+                <button type="submit" className="auth-openai-btn-primary">
+                  Continue
                 </button>
               </form>
-              {emailLookupError && (
-                <p className="mt-4 text-center text-sm text-rose-600" role="alert">
-                  {emailLookupError}{" "}
-                  <Link href="/signup" className="font-medium text-sky-700 underline-offset-2 hover:underline">
-                    Create an account
-                  </Link>
-                </p>
-              )}
             </>
           )}
 
           {step === "password" && (
             <form onSubmit={onSubmitPassword} className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2 text-[13px] text-slate-600">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-slate-600">
+                <span className="font-medium text-slate-800">{username.trim()}</span>
+                <span className="text-slate-400">·</span>
                 <span className="truncate">{email}</span>
                 <button
                   type="button"
@@ -174,27 +138,26 @@ export default function LoginPage() {
                   onClick={() => {
                     setStep("email");
                     setPassword("");
-                    setEmailLookupError("");
-                    loginMutation.reset();
+                    signUpMutation.reset();
                   }}
                 >
                   Change email
                 </button>
               </div>
-              <label className="sr-only" htmlFor="login-password">
+              <label className="sr-only" htmlFor="signup-password">
                 Password
               </label>
               <div className="relative">
                 <input
-                  id="login-password"
+                  id="signup-password"
                   type={isPasswordHidden ? "password" : "text"}
-                  autoComplete="current-password"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="Password"
                   className="auth-openai-input pr-12"
                   required
-                  minLength={1}
+                  minLength={8}
                 />
                 <button
                   type="button"
@@ -226,23 +189,20 @@ export default function LoginPage() {
                 />
                 Show password
               </label>
-              <p className="text-center text-[12px] leading-snug text-slate-500">
-                Before continuing, review how we handle data in our deployment policy for your organization.
-              </p>
-              <button type="submit" disabled={loginMutation.isPending} className="auth-openai-btn-primary">
-                {loginMutation.isPending ? "Signing in…" : "Sign in"}
+              <button type="submit" disabled={signUpMutation.isPending} className="auth-openai-btn-primary">
+                {signUpMutation.isPending ? "Creating account…" : "Create account"}
               </button>
             </form>
           )}
 
-          {loginMutation.error && step === "password" && (
-            <p className="mt-4 text-center text-sm text-rose-600">{loginErrorMessage}</p>
+          {signUpMutation.error && step === "password" && (
+            <p className="mt-4 text-center text-sm text-rose-600">{errorMessage}</p>
           )}
 
           <p className="mt-9 text-center text-[13px] text-slate-500">
-            Need an account?{" "}
-            <Link href="/signup" className="font-medium text-sky-700 underline-offset-2 hover:text-sky-900 hover:underline">
-              Create account
+            Already have an account?{" "}
+            <Link href="/login" className="font-medium text-sky-700 underline-offset-2 hover:text-sky-900 hover:underline">
+              Sign in
             </Link>
           </p>
         </div>

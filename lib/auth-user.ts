@@ -66,6 +66,10 @@ export function normalizeAuthUser(input: unknown): AuthUser | null {
   const emailRaw = o.email ?? o.mail;
   const email = typeof emailRaw === "string" ? emailRaw.trim().toLowerCase() : "";
 
+  const usernameRaw = o.username ?? o.userName;
+  const username =
+    typeof usernameRaw === "string" && usernameRaw.trim().length > 0 ? usernameRaw.trim() : undefined;
+
   const roleRaw = o.role ?? o.userRole ?? o.type;
 
   const status = parseUserStatus(o.status ?? o.userStatus ?? o.accountStatus);
@@ -78,13 +82,20 @@ export function normalizeAuthUser(input: unknown): AuthUser | null {
   }
 
   if (o.isAdmin === true || o.admin === true) {
-    return { id, email, role: "ADMIN" as const, ...(status ? { status } : {}) };
+    return {
+      id,
+      email,
+      role: "ADMIN" as const,
+      ...(username ? { username } : {}),
+      ...(status ? { status } : {}),
+    };
   }
 
   return {
     id,
     email,
     role: normalizeRole(roleRaw),
+    ...(username ? { username } : {}),
     ...(status ? { status } : {}),
   };
 }
@@ -212,11 +223,18 @@ export function resolveAuthUserFromCredentialResponse(payload: unknown, fallback
   const roleRaw = r.role ?? r.userRole;
   const statusFlat = parseUserStatus(r.status ?? r.userStatus ?? r.accountStatus);
 
+  const usernameFlatRaw = r.username ?? r.userName;
+  const usernameFlat =
+    typeof usernameFlatRaw === "string" && usernameFlatRaw.trim().length > 0
+      ? usernameFlatRaw.trim()
+      : undefined;
+
   if (id && email) {
     return {
       id,
       email,
       role: normalizeRole(roleRaw),
+      ...(usernameFlat ? { username: usernameFlat } : {}),
       ...(statusFlat ? { status: statusFlat } : {}),
     };
   }

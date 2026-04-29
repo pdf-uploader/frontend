@@ -3,7 +3,7 @@
 import { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 
-const FULL_WIDTH_ROUTES = new Set(["/", "/login"]);
+const FULL_WIDTH_ROUTES = new Set(["/", "/login", "/signup"]);
 
 export function MainShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();

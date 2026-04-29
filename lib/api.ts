@@ -18,6 +18,8 @@ export const AUTH_ROUTES = {
   signIn: "/auth/signin",
   signUp: "/auth/signup",
   refresh: "/auth/refresh",
+  /** POST `{ email }` → `{ exists?: boolean }` — optional; used before password step on login. */
+  checkEmail: "/auth/check-email",
 } as const;
 
 export const USERS_SIGNUP_ROUTES = {
@@ -36,6 +38,7 @@ const AUTH_ENDPOINTS = [
   AUTH_ROUTES.signIn,
   AUTH_ROUTES.signUp,
   AUTH_ROUTES.refresh,
+  AUTH_ROUTES.checkEmail,
   "/auth/signOut",
   "/auth/signout",
 ];
@@ -171,13 +174,43 @@ api.interceptors.response.use(
   }
 );
 
-export async function signUp(email: string, password: string): Promise<void> {
-  await api.post(AUTH_ROUTES.signUp, { email, password });
+export async function signUp(email: string, password: string, username: string): Promise<void> {
+  await api.post(AUTH_ROUTES.signUp, { email, password, username: username.trim() });
+}
+
+/**
+ * Whether an account exists for sign-in. Backend should implement POST `/auth/check-email`
+ * with JSON body `{ email }` and respond `{ "exists": true | false }` (or `{ "registered": … }`).
+ * HTTP **404** is treated as email not registered.
+ *
+ * Override path with `NEXT_PUBLIC_AUTH_CHECK_EMAIL_PATH`. Set `NEXT_PUBLIC_AUTH_CHECK_EMAIL_DISABLED=true`
+ * in `.env` to skip the request (login will go straight to the password step — dev only).
+ */
+export async function checkEmailRegisteredForLogin(email: string): Promise<boolean> {
+  const path = process.env.NEXT_PUBLIC_AUTH_CHECK_EMAIL_PATH?.trim() ?? AUTH_ROUTES.checkEmail;
+  try {
+    const { data } = await api.post<{ exists?: boolean; registered?: boolean }>(path, {
+      email: email.trim().toLowerCase(),
+    });
+    if (typeof data.exists === "boolean") {
+      return data.exists;
+    }
+    if (typeof data.registered === "boolean") {
+      return data.registered;
+    }
+    return true;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 export type ApplicantSignUpPayload = {
   email: string;
   password: string;
+  username: string;
   sendWelcomeEmail?: boolean;
   appBaseUrl?: string;
   usersPortalUrl?: string;
@@ -214,7 +247,7 @@ export async function signIn(email: string, password: string): Promise<SignInRes
     if (isLoginBlockedAccountStatus(effectiveStatus)) {
       authStore.clear();
       await signOut();
-      throw new SignInBlockedByAccountStatusError(effectiveStatus);
+      throw new SignInBlockedByAccountStatusError(effectiveStatus as UserStatus);
     }
 
     authStore.setRefreshToken(refreshToken ?? null);

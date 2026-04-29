@@ -205,7 +205,7 @@ export default function FolderPage() {
       }
 
       if (fileSortField === "filename") {
-        const compared = a.filename.localeCompare(b.filename, "ko", { sensitivity: "base" });
+        const compared = a.filename.localeCompare(b.filename, "en", { sensitivity: "base" });
         return fileSortDirection === "desc" ? -compared : compared;
       }
 
@@ -661,7 +661,7 @@ function compareVersionLikeFilename(leftFilename: string, rightFilename: string)
     }
   }
 
-  return leftFilename.localeCompare(rightFilename, "ko", { numeric: true, sensitivity: "base" });
+  return leftFilename.localeCompare(rightFilename, "en", { numeric: true, sensitivity: "base" });
 }
 
 function extractLeadingNumberTokens(filename: string): number[] {

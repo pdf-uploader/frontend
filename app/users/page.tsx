@@ -4,7 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import axios from "axios";
+import { getBackendErrorMessage } from "@/lib/api-errors";
 import { isAdminUser } from "@/lib/auth-user";
 import { api, patchUserStatus, signUpApplicantUser } from "@/lib/api";
 import { APP_PUBLIC_BASE_URL, APP_USERS_PORTAL_URL } from "@/lib/app-site";
@@ -16,6 +16,7 @@ export default function UsersPage() {
   const router = useRouter();
   const { user, token } = useAuth();
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isCreatePasswordHidden, setIsCreatePasswordHidden] = useState(true);
   const [visibleUserPasswords, setVisibleUserPasswords] = useState<Record<string, boolean>>({});
@@ -46,6 +47,7 @@ export default function UsersPage() {
     mutationFn: async () =>
       signUpApplicantUser({
         email,
+        username: username.trim(),
         password,
         sendWelcomeEmail: true,
         appBaseUrl: APP_PUBLIC_BASE_URL,
@@ -53,6 +55,7 @@ export default function UsersPage() {
       }),
     onSuccess: () => {
       setEmail("");
+      setUsername("");
       setPassword("");
       void usersQuery.refetch();
     },
@@ -88,7 +91,7 @@ export default function UsersPage() {
   const toggleUserPasswordVisibility = (userId: string) => {
     setVisibleUserPasswords((previous) => ({ ...previous, [userId]: !previous[userId] }));
   };
-  const createUserErrorMessage = getBackendErrorMessage(createUserMutation.error);
+  const createUserErrorMessage = getBackendErrorMessage(createUserMutation.error, "Failed to create user.");
 
   return (
     <section className="ui-shell mx-auto max-w-2xl space-y-5">
@@ -121,6 +124,16 @@ export default function UsersPage() {
           placeholder="Email"
           className="ui-input"
           required
+        />
+        <input
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          placeholder="Username"
+          className="ui-input"
+          autoComplete="username"
+          required
+          minLength={2}
+          maxLength={64}
         />
         <div className="relative">
           <input
@@ -186,7 +199,7 @@ export default function UsersPage() {
           )}
         </div>
         {usersQuery.isLoading && <p className="text-sm text-slate-600">Loading users...</p>}
-        {usersQuery.error && <p className="text-sm text-red-600">{getBackendErrorMessage(usersQuery.error)}</p>}
+        {usersQuery.error && <p className="text-sm text-red-600">{getBackendErrorMessage(usersQuery.error, "Failed to load users.")}</p>}
         {usersQuery.data && usersQuery.data.length === 0 && <p className="text-sm text-slate-600">No users found.</p>}
         {usersQuery.data && usersQuery.data.length > 0 && displayedUsers.length === 0 && (
           <p className="text-sm text-slate-600">No users match this status filter.</p>
@@ -197,7 +210,7 @@ export default function UsersPage() {
               <thead>
                 <tr className="border-b border-slate-200 text-slate-700">
                   <th className="px-2 py-2 font-semibold">Email</th>
-                  <th className="px-2 py-2 font-semibold">Role</th>
+                  <th className="px-2 py-2 font-semibold">Username</th>
                   <th className="px-2 py-2 font-semibold">Status</th>
                   <th className="px-2 py-2 font-semibold">Password</th>
                   <th className="px-2 py-2 font-semibold">Action</th>
@@ -207,7 +220,7 @@ export default function UsersPage() {
                 {displayedUsers.map((listedUser) => (
                   <tr key={listedUser.id} className="border-b border-slate-100 text-slate-700">
                     <td className="px-2 py-2">{listedUser.email || "-"}</td>
-                    <td className="px-2 py-2">{listedUser.role || "-"}</td>
+                    <td className="px-2 py-2">{listedUser.username?.trim() || "-"}</td>
                     <td className="px-2 py-2">
                       <select
                         className="ui-input max-w-[11rem] py-1.5 text-xs"
@@ -288,37 +301,11 @@ export default function UsersPage() {
             </table>
           </div>
         )}
-        {deleteUserMutation.error && <p className="text-sm text-red-600">{getBackendErrorMessage(deleteUserMutation.error)}</p>}
+        {deleteUserMutation.error && <p className="text-sm text-red-600">{getBackendErrorMessage(deleteUserMutation.error, "Failed to delete user.")}</p>}
         {updateStatusMutation.error && (
-          <p className="text-sm text-red-600">{getBackendErrorMessage(updateStatusMutation.error)}</p>
+          <p className="text-sm text-red-600">{getBackendErrorMessage(updateStatusMutation.error, "Failed to update status.")}</p>
         )}
       </section>
     </section>
   );
-}
-
-function getBackendErrorMessage(error: unknown): string {
-  if (axios.isAxiosError(error)) {
-    const data = error.response?.data as { message?: string; error?: string } | string | undefined;
-    if (typeof data === "string" && data.trim()) {
-      return data;
-    }
-    if (data && typeof data === "object") {
-      if (typeof data.message === "string" && data.message.trim()) {
-        return data.message;
-      }
-      if (typeof data.error === "string" && data.error.trim()) {
-        return data.error;
-      }
-    }
-    if (typeof error.message === "string" && error.message.trim()) {
-      return error.message;
-    }
-  }
-
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-
-  return "Failed to create user.";
 }

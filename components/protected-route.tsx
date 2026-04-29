@@ -6,7 +6,7 @@ import { hasAuthSession } from "@/lib/auth-session";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { ReactNode } from "react";
 
-const PUBLIC_ROUTES = new Set(["/", "/login"]);
+const PUBLIC_ROUTES = new Set(["/", "/login", "/signup"]);
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -19,7 +19,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     if (!loggedIn && !isPublic) {
       router.replace("/");
     }
-    if (loggedIn && pathname === "/login") {
+    if (loggedIn && (pathname === "/login" || pathname === "/signup")) {
       router.replace("/");
     }
   }, [loggedIn, isPublic, pathname, router]);

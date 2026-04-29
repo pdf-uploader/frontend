@@ -1,16 +1,14 @@
 "use client";
 
 import { badgeClassesForUserStatus, parseUserStatus } from "@/lib/user-status";
-import type { UserStatus } from "@/lib/types";
-
 export function UserStatusBadge({
   status,
 }: {
   status?: unknown;
 }) {
   const normalized = parseUserStatus(status);
-  const label = (normalized ?? "WAITING") as UserStatus;
   const cls = badgeClassesForUserStatus(normalized);
+  const label = normalized ?? "WAITING";
 
   return (
     <span

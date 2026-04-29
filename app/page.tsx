@@ -18,7 +18,7 @@ export default function HomePage() {
   const isLoggedIn = hasAuthSession(auth);
 
   if (!isHydrated || !isLoggedIn) {
-    return <HomeScrollSequence loginHref="/login" />;
+    return <HomeScrollSequence />;
   }
 
   return (

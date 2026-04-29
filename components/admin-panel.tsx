@@ -11,6 +11,7 @@ import { AppUser, Folder, UserStatus } from "@/lib/types";
 export function AdminPanel() {
   const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [folderName, setFolderName] = useState("");
@@ -32,6 +33,7 @@ export function AdminPanel() {
     mutationFn: async () =>
       signUpApplicantUser({
         email,
+        username: username.trim(),
         password,
         sendWelcomeEmail: true,
         appBaseUrl: APP_PUBLIC_BASE_URL,
@@ -39,6 +41,7 @@ export function AdminPanel() {
       }),
     onSuccess: () => {
       setEmail("");
+      setUsername("");
       setPassword("");
       queryClient.invalidateQueries({ queryKey: ["users"] });
     },
@@ -108,10 +111,20 @@ export function AdminPanel() {
         <h3 className="text-base font-semibold">Create User</h3>
         <form className="space-y-3" onSubmit={submitCreateUser}>
           <input className="w-full rounded border p-2 text-sm" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input
+            className="w-full rounded border p-2 text-sm"
+            placeholder="Username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username"
+            required
+            minLength={2}
+            maxLength={64}
+          />
           <input className="w-full rounded border p-2 text-sm" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
           <button
             className="rounded bg-blue-600 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={createUserMutation.isPending || !email || !password}
+            disabled={createUserMutation.isPending || !email.trim() || !username.trim() || !password}
           >
             Create
           </button>
@@ -139,6 +152,9 @@ export function AdminPanel() {
                 <div className="pr-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <span>{user.email}</span>
+                    {user.username?.trim() ? (
+                      <span className="text-slate-600">@{user.username.trim()}</span>
+                    ) : null}
                     <UserStatusBadge status={user.status} />
                     <select
                       className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800"

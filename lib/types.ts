@@ -1,13 +1,12 @@
 export type UserRole = "ADMIN" | "USER";
 
-/** Account approval workflow (Prisma-style enums often stringify as WAITING / APPROVED / REJECTED). */
-export type UserStatus = "WAITING" | "REJECTED" | "APPROVED";
+export type UserStatus = "WAITING" | "APPROVED" | "REJECTED";
 
 export interface AuthUser {
   id: string;
   email: string;
   role: UserRole;
-  /** Account lifecycle (sign-in allowed only when APPROVED or omitted). */
+  username?: string;
   status?: UserStatus;
 }
 
@@ -17,14 +16,10 @@ export interface AuthTokens {
 }
 
 export interface SignInResponse {
-  message?: string;
-  /** Present when API returns JWT in JSON; otherwise tokens are HttpOnly cookies only. */
-  accessToken?: string;
-  /** Echoed from backend so UI can show ADMIN/USER without decoding HttpOnly JWT. */
-  role?: UserRole;
-  /** Account approval gate — WAITING / REJECTED must not complete login. */
-  status?: UserStatus;
+  message: string | undefined;
+  accessToken: string;
   user?: AuthUser;
+  role?: UserRole;
 }
 
 export interface FolderFile {
@@ -67,6 +62,8 @@ export interface AppUser {
   id: string;
   email: string;
   role: UserRole;
+  /** Display / login handle — aligned with POST signup payloads. */
+  username?: string;
   status?: UserStatus;
   password?: string;
   passwordHash?: string;

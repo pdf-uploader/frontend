@@ -480,7 +480,7 @@ function sortFoldersByOrder(folders: Folder[]): Folder[] {
     if (ao !== bo) {
       return ao - bo;
     }
-    return a.foldername.localeCompare(b.foldername);
+    return a.foldername.localeCompare(b.foldername, "en", { sensitivity: "base" });
   });
 }
 
