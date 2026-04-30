@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { PdfViewerPageLoading } from "@/components/pdf-loading-ui";
+import { DocumentChatWidget } from "@/components/document-chat-widget";
 import { api, createBookmark, deleteBookmark, getBookmarks } from "@/lib/api";
 import { FileDetails } from "@/lib/types";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -51,11 +52,18 @@ const COVER_TONE_OPTIONS: Array<{ id: CoverToneId; label: string; swatch: string
 export default function FileViewerPage() {
   const params = useParams<{ fileId: string }>();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const fileId = params.fileId;
   const keyword = searchParams.get("keyword") ?? "";
   const page = Number(searchParams.get("page") ?? "1");
   const returnToParam = searchParams.get("returnTo");
+  const previewParam = searchParams.get("preview");
+  const previewMode =
+    previewParam !== null &&
+    previewParam.trim().toLowerCase() !== "0" &&
+    previewParam.trim().toLowerCase() !== "false" &&
+    previewParam.trim().toLowerCase() !== "no";
   const initialPage = Number.isFinite(page) && page > 0 ? page : 1;
   const [currentPage, setCurrentPage] = useState(initialPage);
   const [activeKeywordHitIndex, setActiveKeywordHitIndex] = useState(0);
@@ -77,6 +85,7 @@ export default function FileViewerPage() {
     loaded: 0,
     total: null,
   });
+  const [fullscreenSearchDraft, setFullscreenSearchDraft] = useState("");
   const viewerSectionRef = useRef<HTMLElement | null>(null);
   const lastTapTimeRef = useRef(0);
   const hideFullscreenMenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -275,6 +284,25 @@ export default function FileViewerPage() {
   const totalKeywordHits = keywordHits.length;
   const currentKeywordHit = totalKeywordHits > 0 ? activeKeywordHitIndex + 1 : 0;
   const activeKeywordTarget = totalKeywordHits > 0 ? keywordHits[activeKeywordHitIndex] ?? null : null;
+
+  useEffect(() => {
+    setFullscreenSearchDraft(keyword);
+  }, [keyword]);
+
+  const applyKeywordToUrl = useCallback(
+    (nextKeyword: string) => {
+      const q = new URLSearchParams(searchParams.toString());
+      const trimmed = nextKeyword.trim();
+      if (trimmed) {
+        q.set("keyword", trimmed);
+      } else {
+        q.delete("keyword");
+      }
+      router.replace(`${pathname}?${q.toString()}`);
+    },
+    [pathname, router, searchParams]
+  );
+
   useEffect(() => {
     if (!keywordHits.length) {
       setActiveKeywordHitIndex(0);
@@ -466,54 +494,132 @@ export default function FileViewerPage() {
       >
         {isFullscreen ? (
           <>
-            <div className="peer absolute inset-x-0 top-0 z-20 h-16" />
+            <div className="peer absolute inset-x-0 top-0 z-20 h-24" />
             <div
               className={[
-                "absolute left-1/2 top-2 z-30 flex w-max -translate-x-1/2 -translate-y-3 flex-col items-center gap-2 transition-all duration-200 peer-hover:pointer-events-auto peer-hover:translate-y-0 peer-hover:opacity-100 hover:pointer-events-auto hover:translate-y-0 hover:opacity-100",
+                "absolute left-1/2 top-3 z-30 flex w-max -translate-x-1/2 -translate-y-[18px] flex-col items-center gap-3 transition-all duration-200 peer-hover:pointer-events-auto peer-hover:translate-y-0 peer-hover:opacity-100 hover:pointer-events-auto hover:translate-y-0 hover:opacity-100",
                 showFullscreenMenu
                   ? "pointer-events-auto translate-y-0 opacity-100"
                   : "pointer-events-none opacity-0",
               ].join(" ")}
             >
-              <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/95 p-1.5 shadow-sm backdrop-blur">
-                <div className="relative">
+              <div className="flex max-w-[min(96vw,36rem)] flex-col items-stretch gap-3 rounded-xl border border-slate-200 bg-white/95 p-[15px] shadow-sm backdrop-blur">
+                <form
+                  className="flex min-w-0 flex-wrap items-center gap-[9px]"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    applyKeywordToUrl(fullscreenSearchDraft);
+                    revealFullscreenMenuTemporarily();
+                  }}
+                >
+                  <label className="sr-only" htmlFor="fullscreen-pdf-search">
+                    Search text in PDF
+                  </label>
+                  <input
+                    id="fullscreen-pdf-search"
+                    type="search"
+                    value={fullscreenSearchDraft}
+                    onChange={(event) => setFullscreenSearchDraft(event.target.value)}
+                    placeholder="Search in PDF…"
+                    className="min-h-[51px] min-w-[min(100%,15rem)] flex-1 rounded-lg border border-slate-300 bg-white px-[15px] py-[9px] text-lg leading-snug text-slate-900 outline-none focus:border-slate-400 focus:ring-[3px] focus:ring-slate-200/80"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-slate-900 px-[18px] py-[9px] text-[17px] font-semibold text-white hover:bg-slate-800"
+                  >
+                    Find
+                  </button>
+                  {keyword ? (
+                    <button
+                      type="button"
+                      className="rounded-lg border border-slate-300 bg-white px-[15px] py-[9px] text-[17px] font-medium text-slate-700 hover:bg-slate-50"
+                      onClick={() => {
+                        setFullscreenSearchDraft("");
+                        applyKeywordToUrl("");
+                        revealFullscreenMenuTemporarily();
+                      }}
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                </form>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <span className="rounded-full bg-slate-900 px-[15px] py-[9px] text-[17px] font-semibold text-white">
+                    Page {currentPage} / {totalPages || "—"}
+                  </span>
+                  {keyword ? (
+                    <div className="flex items-center gap-[3px] rounded-lg border border-slate-300 bg-white p-[3px]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigateKeywordHit("previous");
+                          revealFullscreenMenuTemporarily();
+                        }}
+                        disabled={!totalKeywordHits}
+                        className="rounded-md px-3 py-[9px] text-[17px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label="Go to previous keyword match"
+                        title="Previous keyword match"
+                      >
+                        ← Prev
+                      </button>
+                      <span className="min-w-[6.75rem] text-center text-[17px] font-medium text-slate-600">
+                        {totalKeywordHits ? `${currentKeywordHit} / ${totalKeywordHits}` : "—"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigateKeywordHit("next");
+                          revealFullscreenMenuTemporarily();
+                        }}
+                        disabled={!totalKeywordHits}
+                        className="rounded-md px-3 py-[9px] text-[17px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label="Go to next keyword match"
+                        title="Next keyword match"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  ) : null}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={onBookmarkPrimaryAction}
+                      className="rounded-md px-[15px] py-[9px] text-[17px] font-semibold transition"
+                      style={bookmarkButtonStyle}
+                    >
+                      {bookmarkButtonLabel}
+                    </button>
+                    {showBookmarkPagePicker && canChooseBookmarkPage && (
+                      <div className="absolute left-1/2 top-[calc(100%+12px)] z-40 flex max-w-[90vw] -translate-x-1/2 flex-wrap items-center justify-center gap-[6px] rounded-md border border-slate-200 bg-white p-[9px] shadow-xl">
+                        {visiblePages.map((pageNumber) => {
+                          const selected = selectedBookmarkPage === pageNumber;
+                          const alreadyBookmarked = bookmarkedPages.includes(pageNumber);
+                          return (
+                            <button
+                              key={`bookmark-target-fullscreen-${pageNumber}`}
+                              type="button"
+                              onClick={() => onChooseBookmarkPage(pageNumber)}
+                              className={[
+                                "rounded px-3 py-[9px] text-[17px] font-medium transition",
+                                selected ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100",
+                              ].join(" ")}
+                            >
+                              {alreadyBookmarked ? `Page ${pageNumber} ✓` : `Page ${pageNumber}`}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="button"
-                    onClick={onBookmarkPrimaryAction}
-                    className="rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition"
-                    style={bookmarkButtonStyle}
+                    onClick={() => void toggleFullscreen()}
+                    className="rounded-md border border-slate-300 bg-white px-[15px] py-[9px] text-[17px] font-medium text-slate-800 shadow-sm hover:bg-slate-50"
                   >
-                    {bookmarkButtonLabel}
+                    Exit full screen
                   </button>
-                  {showBookmarkPagePicker && canChooseBookmarkPage && (
-                    <div className="absolute left-1/2 top-[calc(100%+8px)] z-40 flex -translate-x-1/2 items-center gap-1 rounded-md border border-slate-200 bg-white p-1.5 shadow-xl backdrop-blur">
-                      {visiblePages.map((pageNumber) => {
-                        const selected = selectedBookmarkPage === pageNumber;
-                        const alreadyBookmarked = bookmarkedPages.includes(pageNumber);
-                        return (
-                          <button
-                            key={`bookmark-target-fullscreen-${pageNumber}`}
-                            type="button"
-                            onClick={() => onChooseBookmarkPage(pageNumber)}
-                            className={[
-                              "rounded px-2 py-1 text-[11px] font-medium transition",
-                              selected ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100",
-                            ].join(" ")}
-                          >
-                            {alreadyBookmarked ? `Page ${pageNumber} ✓` : `Page ${pageNumber}`}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void toggleFullscreen()}
-                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-800 shadow-sm hover:bg-slate-50"
-                >
-                  Exit full screen
-                </button>
               </div>
             </div>
           </>
@@ -761,6 +867,7 @@ export default function FileViewerPage() {
               pageTone={pageTone}
               coverTone={coverTone}
               isFullscreen={isFullscreen}
+              previewMode={previewMode}
               onCurrentPageChange={setCurrentPage}
               onNumPagesChange={setTotalPages}
               onVisiblePagesChange={setVisiblePages}
@@ -769,6 +876,12 @@ export default function FileViewerPage() {
           )}
         </div>
       </div>
+      {/* Reader chat size & fonts: `lib/reader-chat-room.ts` — READER_CHAT_ROOM, READER_CHAT_FONT */}
+      <DocumentChatWidget
+        folderId={fileQuery.data.folderId}
+        layout="reader"
+        stackZClass={isFullscreen ? "z-[70]" : "z-40"}
+      />
     </section>
   );
 }

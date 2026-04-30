@@ -1,12 +1,34 @@
 "use client";
 
 import { PdfDocumentRenderLoading } from "@/components/pdf-loading-ui";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+
+/** Fullscreen only: zoom as scale factors (100% = 1). +/- steps these; pinch clamps and snaps on release. */
+const FULLSCREEN_ZOOM_SCALES = [1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.4, 2.6, 2.8, 3] as const;
+
+function snapScaleToFullscreenPreset(scale: number): number {
+  let best: (typeof FULLSCREEN_ZOOM_SCALES)[number] = FULLSCREEN_ZOOM_SCALES[0];
+  let bestDiff = Math.abs(scale - best);
+  for (const candidate of FULLSCREEN_ZOOM_SCALES) {
+    const d = Math.abs(scale - candidate);
+    if (d < bestDiff) {
+      bestDiff = d;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function fullscreenZoomPresetIndex(scale: number): number {
+  const snapped = snapScaleToFullscreenPreset(scale);
+  const i = FULLSCREEN_ZOOM_SCALES.findIndex((s) => Math.abs(s - snapped) < 1e-9);
+  return i >= 0 ? i : 0;
+}
 
 interface PDFViewerProps {
   fileUrl: string;
@@ -19,6 +41,8 @@ interface PDFViewerProps {
   pageTone?: PageToneId;
   coverTone?: CoverToneId;
   isFullscreen?: boolean;
+  /** Embedded / preview URLs: hide zoom UI and lock magnification to 100%. */
+  previewMode?: boolean;
   onCurrentPageChange?: (page: number) => void;
   onNumPagesChange?: (total: number) => void;
   onVisiblePagesChange?: (pages: number[]) => void;
@@ -40,6 +64,7 @@ export function PDFViewer({
   pageTone = "white",
   coverTone = "slate",
   isFullscreen = false,
+  previewMode = false,
   onCurrentPageChange,
   onNumPagesChange,
   onVisiblePagesChange,
@@ -57,8 +82,6 @@ export function PDFViewer({
   /** Until page 1 loads, assume near-A4 portrait for fullscreen contain math (PDF points ratio). */
   const FULLSCREEN_FALLBACK_PDF_HEIGHT_OVER_WIDTH = 1.414;
   const MIN_ZOOM = 1;
-  const MAX_ZOOM = 3;
-  const ZOOM_STEP = 0.2;
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(activePage);
   const [flipDirection, setFlipDirection] = useState<"next" | "prev" | null>(null);
@@ -83,10 +106,17 @@ export function PDFViewer({
   const pinchStartScaleRef = useRef(1);
   const isPinchingRef = useRef(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const panPointerIdRef = useRef<number | null>(null);
+  const panLastClientRef = useRef({ x: 0, y: 0 });
+  const panDragMovedRef = useRef(false);
+  const [isPanningViewport, setIsPanningViewport] = useState(false);
   const normalizedKeyword = highlightEnabled ? keyword.trim().toLowerCase() : "";
   const bookmarkedSet = useMemo(() => new Set(bookmarkedPages), [bookmarkedPages]);
   const FLIP_DURATION = 460;
   const zoomPercent = Math.round(pinchZoomScale * visualViewportScale * 100);
+  const zoomHudPercent = isFullscreen
+    ? Math.round(snapScaleToFullscreenPreset(pinchZoomScale) * 100)
+    : zoomPercent;
   const isSinglePageView =
     viewportWidth > 0 &&
     (viewportWidth < MOBILE_BREAKPOINT ||
@@ -97,6 +127,8 @@ export function PDFViewer({
   const rightPage = !isSinglePageView && effectiveDesktopLeftPage + 1 <= numPages ? effectiveDesktopLeftPage + 1 : null;
   const isSinglePageFullscreen = isFullscreen && isSinglePageView;
   const isZoomedDocument = pinchZoomScale > MIN_ZOOM;
+  /** Fullscreen desktop spread: single horizontal strip so zoomed pages keep intrinsic width and don’t overlap in a 50/50 grid. */
+  const fullscreenSpreadCombinedZoom = isFullscreen && isZoomedDocument && !isSinglePageView;
   const shouldFitToFullscreenHeight =
     isSinglePageFullscreen && pinchZoomScale <= MIN_ZOOM && pdfPageViewportSize === null;
   const domBookContentWidth = getBookViewportContentWidth(viewportRef.current);
@@ -105,7 +137,12 @@ export function PDFViewer({
     isFullscreen && viewportWidth > 0 ? Math.max(domBookContentWidth, viewportWidth) : domBookContentWidth;
 
   const pageWidth = useMemo(() => {
-    const z = Math.max(pinchZoomScale, 0.01);
+    /**
+     * Fullscreen: fit width is computed at 100% zoom only; magnification is applied solely via
+     * `<Page scale={pinchZoomScale}>`. Including pinchZoomScale in the width formula divides by z,
+     * which cancels scale and makes +/- zoom appear broken.
+     */
+    const zFit = isFullscreen ? MIN_ZOOM : Math.max(pinchZoomScale, 0.01);
     const fullscreenPdfLaneHeight =
       isFullscreen && viewportHeight > 0 ? Math.max(0, viewportHeight - FULLSCREEN_LAYOUT_EPSILON_PX) : 0;
     const pdfVw = pdfPageViewportSize?.width ?? 1;
@@ -123,21 +160,21 @@ export function PDFViewer({
           availH: fullscreenPdfLaneHeight,
           pdfViewportWidth: pdfVw,
           pdfViewportHeight: pdfVh,
-          zoomScale: z,
+          zoomScale: zFit,
           columns: 1,
           gapPx,
         });
         return clampNumber(fit, 240, 8000);
       }
       return clampNumber(
-        Math.floor((bookContentWidth - sideReserve) / z),
+        Math.floor((bookContentWidth - sideReserve) / zFit),
         240,
         isFullscreen ? 1200 : MOBILE_PAGE_MAX_WIDTH
       );
     }
     if (isFullscreen) {
       if (fullscreenPdfLaneHeight <= 0) {
-        return clampNumber(Math.floor((bookContentWidth - 8) / (2 * z)), 320, 8000);
+        return clampNumber(Math.floor((bookContentWidth - 8) / (2 * zFit)), 320, 8000);
       }
       const gapPx = 0;
       const fit = computeFullscreenContainPageWidthProp({
@@ -145,14 +182,14 @@ export function PDFViewer({
         availH: fullscreenPdfLaneHeight,
         pdfViewportWidth: pdfVw,
         pdfViewportHeight: pdfVh,
-        zoomScale: z,
+        zoomScale: zFit,
         columns: 2,
         gapPx,
       });
       return clampNumber(fit, 320, 8000);
     }
     return clampNumber(
-      Math.floor((bookContentWidth - BOOK_GRID_GAP_PX - 2 * DESKTOP_SPREAD_PAGE_FRAME) / (2 * z)),
+      Math.floor((bookContentWidth - BOOK_GRID_GAP_PX - 2 * DESKTOP_SPREAD_PAGE_FRAME) / (2 * zFit)),
       200,
       BOOK_PAGE_MAX_WIDTH
     );
@@ -176,6 +213,35 @@ export function PDFViewer({
       isPinchingRef.current = false;
     }
   }, [MIN_ZOOM, isSinglePageFullscreen]);
+
+  useEffect(() => {
+    if (!isFullscreen) {
+      return;
+    }
+    setPinchZoomScale((s) => {
+      const lo = FULLSCREEN_ZOOM_SCALES[0];
+      const hi = previewMode ? MIN_ZOOM : FULLSCREEN_ZOOM_SCALES[FULLSCREEN_ZOOM_SCALES.length - 1];
+      return snapScaleToFullscreenPreset(clampNumber(s, lo, hi));
+    });
+  }, [isFullscreen, previewMode]);
+
+  useEffect(() => {
+    if (!previewMode) {
+      return;
+    }
+    setPinchZoomScale(MIN_ZOOM);
+    pinchStartDistanceRef.current = null;
+    pinchStartScaleRef.current = MIN_ZOOM;
+    isPinchingRef.current = false;
+  }, [previewMode, MIN_ZOOM]);
+
+  /** Inline (non-fullscreen) viewer is preview-style: no magnification. */
+  useEffect(() => {
+    if (isFullscreen) {
+      return;
+    }
+    setPinchZoomScale(MIN_ZOOM);
+  }, [isFullscreen, MIN_ZOOM]);
 
   useEffect(() => {
     setPinchZoomScale(MIN_ZOOM);
@@ -319,20 +385,143 @@ export function PDFViewer({
 
   const canFlipNext = isSinglePageView ? currentPage < numPages : effectiveDesktopLeftPage + 2 <= numPages;
   const canFlipPrev = isSinglePageView ? currentPage > 1 : effectiveDesktopLeftPage > 1;
-  const canZoomOut = pinchZoomScale > MIN_ZOOM;
-  const canZoomIn = pinchZoomScale < MAX_ZOOM;
+  const fullscreenZoomMax = FULLSCREEN_ZOOM_SCALES[FULLSCREEN_ZOOM_SCALES.length - 1];
+  /** Zoom chrome and pinch steps only in fullscreen; optional `preview` URL disables there too. */
+  const showZoomUi = isFullscreen && !previewMode;
+  const pinchZoomUpper = showZoomUi ? fullscreenZoomMax : MIN_ZOOM;
+
+  const canZoomOut = showZoomUi && fullscreenZoomPresetIndex(pinchZoomScale) > 0;
+  const canZoomIn = showZoomUi && fullscreenZoomPresetIndex(pinchZoomScale) < FULLSCREEN_ZOOM_SCALES.length - 1;
 
   const zoomOut = () => {
-    setPinchZoomScale((prev) => clampNumber(Number((prev - ZOOM_STEP).toFixed(2)), MIN_ZOOM, MAX_ZOOM));
+    if (!showZoomUi) {
+      return;
+    }
+    setPinchZoomScale((prev) => {
+      const i = fullscreenZoomPresetIndex(prev);
+      return FULLSCREEN_ZOOM_SCALES[Math.max(0, i - 1)];
+    });
   };
 
   const zoomIn = () => {
-    setPinchZoomScale((prev) => clampNumber(Number((prev + ZOOM_STEP).toFixed(2)), MIN_ZOOM, MAX_ZOOM));
+    if (!showZoomUi) {
+      return;
+    }
+    setPinchZoomScale((prev) => {
+      const i = fullscreenZoomPresetIndex(prev);
+      return FULLSCREEN_ZOOM_SCALES[Math.min(FULLSCREEN_ZOOM_SCALES.length - 1, i + 1)];
+    });
   };
 
   const resetZoom = () => {
-    setPinchZoomScale(MIN_ZOOM);
+    if (!showZoomUi) {
+      return;
+    }
+    setPinchZoomScale(FULLSCREEN_ZOOM_SCALES[0]);
   };
+
+  const canPanFullscreen = isFullscreen && pinchZoomScale > MIN_ZOOM;
+
+  const onPanPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!canPanFullscreen || isPinchingRef.current) {
+        return;
+      }
+      if (!event.isPrimary) {
+        return;
+      }
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-pdf-zoom-controls]")) {
+        return;
+      }
+      if (event.pointerType === "mouse" && event.button !== 0) {
+        return;
+      }
+
+      panPointerIdRef.current = event.pointerId;
+      panLastClientRef.current = { x: event.clientX, y: event.clientY };
+      panDragMovedRef.current = false;
+      setIsPanningViewport(true);
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [canPanFullscreen]
+  );
+
+  const onPanPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (panPointerIdRef.current !== event.pointerId) {
+      return;
+    }
+    const vp = viewportRef.current;
+    if (!vp) {
+      return;
+    }
+
+    const dx = event.clientX - panLastClientRef.current.x;
+    const dy = event.clientY - panLastClientRef.current.y;
+    if (dx !== 0 || dy !== 0) {
+      panDragMovedRef.current = true;
+      vp.scrollLeft -= dx;
+      vp.scrollTop -= dy;
+      panLastClientRef.current = { x: event.clientX, y: event.clientY };
+    }
+  }, []);
+
+  const endPanPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (panPointerIdRef.current !== event.pointerId) {
+      return;
+    }
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      /* already released */
+    }
+    panPointerIdRef.current = null;
+    setIsPanningViewport(false);
+  }, []);
+
+  const onPanPointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      endPanPointer(event);
+    },
+    [endPanPointer]
+  );
+
+  const onPanPointerCancel = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      endPanPointer(event);
+      panDragMovedRef.current = false;
+    },
+    [endPanPointer]
+  );
+
+  const onPanLostPointerCapture = useCallback(() => {
+    panPointerIdRef.current = null;
+    setIsPanningViewport(false);
+  }, []);
+
+  const onViewportClickCapture = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!canPanFullscreen) {
+        return;
+      }
+      if (panDragMovedRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        panDragMovedRef.current = false;
+      }
+    },
+    [canPanFullscreen]
+  );
+
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp || !isFullscreen) {
+      return;
+    }
+    if (pinchZoomScale <= MIN_ZOOM) {
+      vp.scrollTo({ left: 0, top: 0, behavior: "auto" });
+    }
+  }, [pinchZoomScale, isFullscreen, MIN_ZOOM]);
 
   const goToNextSpread = () => {
     if (!canFlipNext || flipDirection) {
@@ -436,7 +625,12 @@ export function PDFViewer({
         ref={viewportRef}
         data-pdf-book-viewport
         className={[
-          "pdf-book-viewport relative w-full min-w-0 max-w-full select-none overflow-x-hidden overflow-y-hidden",
+          "pdf-book-viewport relative w-full min-w-0 max-w-full select-none",
+          isFullscreen && pinchZoomScale > MIN_ZOOM
+            ? ["touch-manipulation overscroll-contain overflow-auto", isPanningViewport ? "cursor-grabbing" : "cursor-grab"].join(
+                " "
+              )
+            : "overflow-x-hidden overflow-y-hidden",
           !isZoomedDocument ? "touch-pan-y" : "",
           isFullscreen
             ? "flex h-full min-h-0 flex-1 flex-col rounded-none border-0 bg-white p-0"
@@ -448,7 +642,16 @@ export function PDFViewer({
           touchAction: isSinglePageFullscreen ? "auto" : undefined,
           ...(!isFullscreen ? getCoverSurfaceStyle(coverTone) : {}),
         }}
+        onClickCapture={onViewportClickCapture}
+        onPointerDown={onPanPointerDown}
+        onPointerMove={onPanPointerMove}
+        onPointerUp={onPanPointerUp}
+        onPointerCancel={onPanPointerCancel}
+        onLostPointerCapture={onPanLostPointerCapture}
         onWheel={(event) => {
+          if (isFullscreen && pinchZoomScale > MIN_ZOOM) {
+            return;
+          }
           if (isSinglePageView) {
             return;
           }
@@ -471,7 +674,7 @@ export function PDFViewer({
             setTouchStartX(null);
             return;
           }
-          if (isSinglePageFullscreen && event.touches.length === 2) {
+          if (isSinglePageFullscreen && event.touches.length === 2 && showZoomUi) {
             pinchStartDistanceRef.current = getTouchDistance(event.touches[0], event.touches[1]);
             pinchStartScaleRef.current = pinchZoomScale;
             isPinchingRef.current = true;
@@ -497,7 +700,7 @@ export function PDFViewer({
           const nextScale = clampNumber(
             pinchStartScaleRef.current * (currentDistance / startDistance),
             MIN_ZOOM,
-            MAX_ZOOM
+            pinchZoomUpper
           );
           setPinchZoomScale(nextScale);
           event.preventDefault();
@@ -514,6 +717,9 @@ export function PDFViewer({
           if (isZoomedDocument) {
             setTouchStartX(null);
             if (event.touches.length < 2) {
+              if (isSinglePageFullscreen && isPinchingRef.current) {
+                setPinchZoomScale((s) => snapScaleToFullscreenPreset(s));
+              }
               pinchStartDistanceRef.current = null;
               pinchStartScaleRef.current = pinchZoomScale;
               isPinchingRef.current = false;
@@ -523,6 +729,7 @@ export function PDFViewer({
 
           if (isSinglePageFullscreen && isPinchingRef.current) {
             if (event.touches.length < 2) {
+              setPinchZoomScale((s) => snapScaleToFullscreenPreset(s));
               pinchStartDistanceRef.current = null;
               pinchStartScaleRef.current = pinchZoomScale;
               isPinchingRef.current = false;
@@ -568,66 +775,91 @@ export function PDFViewer({
           setTouchStartX(null);
         }}
       >
-        {!isSinglePageView && <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/70" />}
-        {!isSinglePageView && (
+        {!isSinglePageView && !fullscreenSpreadCombinedZoom && (
+          <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/70" />
+        )}
+        {!isSinglePageView && !fullscreenSpreadCombinedZoom && (
           <div className="pointer-events-none absolute inset-y-0 left-1/2 w-10 -translate-x-1/2 bg-gradient-to-r from-slate-300/25 via-slate-400/30 to-slate-300/25 blur-lg" />
         )}
+        {showZoomUi && (
+          <div
+            data-pdf-zoom-controls
+            className={[
+              "z-50 flex items-center gap-3 rounded-full border px-3 py-2 shadow-sm backdrop-blur",
+              /* Inside overflow-auto while zoomed, absolute scrolls with content — fixed stays put. */
+              isFullscreen && pinchZoomScale > MIN_ZOOM
+                ? "fixed right-[max(0.75rem,env(safe-area-inset-right,0px))] top-[max(0.75rem,env(safe-area-inset-top,0px))] border-slate-300 bg-white/95 text-slate-800 shadow-sm"
+                : [
+                    "absolute",
+                    isFullscreen
+                      ? "right-[max(0.75rem,env(safe-area-inset-right,0px))] top-[max(0.75rem,env(safe-area-inset-top,0px))] border-slate-300 bg-white/95 text-slate-800 shadow-sm"
+                      : "right-3 top-3 border-slate-300 bg-white/95 text-slate-800",
+                  ].join(" "),
+            ].join(" ")}
+          >
+            <button
+              type="button"
+              onClick={resetZoom}
+              className="px-2 text-[22px] font-semibold leading-none transition hover:opacity-80"
+              title="Reset zoom to 100%"
+              aria-label="Reset zoom to 100 percent"
+            >
+              🔎
+            </button>
+            <button
+              type="button"
+              onClick={zoomOut}
+              disabled={!canZoomOut}
+              className={[
+                "flex h-[56px] w-[56px] shrink-0 items-center justify-center rounded-full text-[28px] font-semibold leading-none transition",
+                "hover:bg-slate-100 disabled:text-slate-300",
+              ].join(" ")}
+              title="Zoom out"
+              aria-label="Zoom out"
+            >
+              -
+            </button>
+            <button
+              type="button"
+              onClick={resetZoom}
+              className={[
+                "min-w-[4.75rem] rounded-full px-5 py-2 text-[22px] font-semibold leading-none transition",
+                "hover:bg-slate-100",
+              ].join(" ")}
+              title="Reset viewer zoom (combines toolbar zoom with visual viewport scale when the browser reports it)"
+              aria-label={`Viewer zoom ${zoomHudPercent} percent; reset to fitted size`}
+            >
+              {zoomHudPercent}%
+            </button>
+            <button
+              type="button"
+              onClick={zoomIn}
+              disabled={!canZoomIn}
+              className={[
+                "flex h-[56px] w-[56px] shrink-0 items-center justify-center rounded-full text-[28px] font-semibold leading-none transition",
+                "hover:bg-slate-100 disabled:text-slate-300",
+              ].join(" ")}
+              title="Zoom in"
+              aria-label="Zoom in"
+            >
+              +
+            </button>
+          </div>
+        )}
         <div
-          data-pdf-zoom-controls
           className={[
-            "absolute z-30 flex items-center gap-1.5 rounded-full border px-1.5 py-1 shadow-sm backdrop-blur",
-            isFullscreen
-              ? "right-[max(0.75rem,env(safe-area-inset-right,0px))] top-[max(0.75rem,env(safe-area-inset-top,0px))] border-slate-300 bg-white/95 text-slate-800 shadow-sm"
-              : "right-3 top-3 border-slate-300 bg-white/95 text-slate-800",
-          ].join(" ")}
-        >
-          <span className="px-1 text-[11px] font-semibold">🔎</span>
-          <button
-            type="button"
-            onClick={zoomOut}
-            disabled={!canZoomOut}
-            className={[
-              "h-7 w-7 rounded-full text-sm font-semibold transition",
-              "hover:bg-slate-100 disabled:text-slate-300",
-            ].join(" ")}
-            title="Zoom out"
-            aria-label="Zoom out"
-          >
-            -
-          </button>
-          <button
-            type="button"
-            onClick={resetZoom}
-            className={[
-              "rounded-full px-2.5 py-1 text-[11px] font-semibold transition",
-              "hover:bg-slate-100",
-            ].join(" ")}
-            title="Reset viewer zoom (combines toolbar zoom with visual viewport scale when the browser reports it)"
-            aria-label={`Viewer zoom ${zoomPercent} percent; reset to fitted size`}
-          >
-            {zoomPercent}%
-          </button>
-          <button
-            type="button"
-            onClick={zoomIn}
-            disabled={!canZoomIn}
-            className={[
-              "h-7 w-7 rounded-full text-sm font-semibold transition",
-              "hover:bg-slate-100 disabled:text-slate-300",
-            ].join(" ")}
-            title="Zoom in"
-            aria-label="Zoom in"
-          >
-            +
-          </button>
-        </div>
-        <div
-          className={[
-            "grid min-h-0 w-full min-w-0 max-w-full grid-cols-1 gap-3 overflow-hidden lg:grid-cols-2 lg:grid-rows-1",
-            isFullscreen ? "min-h-0 flex-1 gap-0 lg:auto-rows-fr" : "",
+            "min-h-0",
+            fullscreenSpreadCombinedZoom
+              ? "flex w-max max-w-none flex-1 flex-row flex-nowrap items-start gap-0 overflow-visible"
+              : [
+                  "min-w-0 grid w-full max-w-full grid-cols-1 gap-3 lg:grid-cols-2 lg:grid-rows-1",
+                  isFullscreen && pinchZoomScale > MIN_ZOOM ? "min-h-0 overflow-visible" : "overflow-hidden",
+                  isFullscreen ? "min-h-0 flex-1 gap-0 lg:auto-rows-fr" : "",
+                ].join(" "),
           ].join(" ")}
         >
           <BookPage
+            fullscreenSpreadStrip={fullscreenSpreadCombinedZoom}
             pageNumber={leftPage}
             isBookmarked={bookmarkedSet.has(leftPage)}
             bookmarkColor={bookmarkColor}
@@ -649,6 +881,7 @@ export function PDFViewer({
           />
           {rightPage ? (
             <BookPage
+              fullscreenSpreadStrip={fullscreenSpreadCombinedZoom}
               pageNumber={rightPage}
               isBookmarked={bookmarkedSet.has(rightPage)}
               bookmarkColor={bookmarkColor}
@@ -665,7 +898,7 @@ export function PDFViewer({
               onNavigateNext={goToNextSpread}
               isRightPage
             />
-          ) : (
+          ) : fullscreenSpreadCombinedZoom ? null : (
             <div className={["hidden lg:block", isFullscreen ? "min-h-0 bg-white" : "rounded-xl border border-dashed border-slate-300 bg-white/70"].join(" ")} />
           )}
         </div>
@@ -699,7 +932,6 @@ export function PDFViewer({
             {isSinglePageView
               ? "Tap left/right side, swipe, or use buttons to navigate pages"
               : "Scroll or click left/right page edges to flip"}
-            {" • "}Use zoom controls for detailed reading
           </p>
           <button
             type="button"
@@ -809,6 +1041,8 @@ interface BookPageProps {
   mobileIncomingPage?: number | null;
   mobileTransitionDirection?: "next" | "prev" | null;
   zoomScale: number;
+  /** Fullscreen zoomed desktop: page sits in a horizontal strip (intrinsic width), not a 50/50 grid cell. */
+  fullscreenSpreadStrip?: boolean;
   onNavigateNext: () => void;
   onNavigatePrev: () => void;
 }
@@ -829,6 +1063,7 @@ function BookPage({
   mobileIncomingPage = null,
   mobileTransitionDirection = null,
   zoomScale,
+  fullscreenSpreadStrip = false,
   onNavigateNext,
   onNavigatePrev,
 }: BookPageProps) {
@@ -873,16 +1108,26 @@ function BookPage({
   return (
     <div
       className={[
-        "group relative flex min-w-0 max-w-full flex-col overflow-hidden rounded-xl border border-slate-200 p-2 shadow-sm transition hover:shadow-md",
-        isFullscreen ? "h-full min-h-0 w-full max-w-full rounded-none border-0 p-0 shadow-none" : "",
-        isZoomed && isMobileView
-          ? "cursor-default"
-          : isRightPage
-            ? "cursor-e-resize"
-            : "cursor-w-resize",
+        "group relative flex min-w-0 max-w-full flex-col rounded-xl border border-slate-200 p-2 shadow-sm transition hover:shadow-md",
+        isFullscreen && isZoomed ? "overflow-visible" : "overflow-hidden",
+        isFullscreen
+          ? fullscreenSpreadStrip
+            ? "h-full min-h-0 w-auto shrink-0 max-w-none rounded-none border-0 p-0 shadow-none"
+            : "h-full min-h-0 w-full max-w-full rounded-none border-0 p-0 shadow-none"
+          : "",
+        isFullscreen && isZoomed
+          ? "cursor-grab active:cursor-grabbing"
+          : isZoomed && isMobileView
+            ? "cursor-default"
+            : isRightPage
+              ? "cursor-e-resize"
+              : "cursor-w-resize",
       ].join(" ")}
       style={!isFullscreen ? { backgroundColor: pageSurface.pageBodyColor } : undefined}
       onClick={(event) => {
+        if (isFullscreen && isZoomed) {
+          return;
+        }
         if (isMobileView) {
           if (isFullscreen) {
             return;
@@ -908,6 +1153,9 @@ function BookPage({
         if (isMobileView) {
           return;
         }
+        if (isFullscreen && isZoomed) {
+          return;
+        }
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           if (isRightPage) {
@@ -925,13 +1173,22 @@ function BookPage({
       )}
       <div
         className={[
-          "relative flex items-start justify-center overflow-hidden rounded-md border border-slate-200",
+          "relative flex items-start rounded-md border border-slate-200",
+          /* Centered layout looks nicer at 1×; when zoomed, centering overflows left of the scroll
+           origin so scrollLeft≥0 cannot reveal it — align start so overflow is pan-scrollable. */
+          isFullscreen && isZoomed ? "justify-start" : "justify-center",
+          isFullscreen && isZoomed ? "overflow-visible" : "overflow-hidden",
           isMobileView
             ? isFullscreen
               ? "h-full min-h-0 p-0"
               : "min-h-[56vh] p-2"
             : isFullscreen
-              ? "flex min-h-0 h-full w-full max-w-full flex-1 flex-row justify-center items-start overflow-hidden rounded-none border-0 p-0"
+              ? [
+                  fullscreenSpreadStrip
+                    ? "flex h-full min-h-0 w-auto max-w-none flex-none flex-row items-start rounded-none border-0 p-0"
+                    : "flex min-h-0 h-full w-full max-w-full flex-1 flex-row items-start rounded-none border-0 p-0",
+                  isZoomed ? "justify-start overflow-visible" : "justify-center overflow-hidden",
+                ].join(" ")
               : "h-[700px]",
         ].join(" ")}
         style={{

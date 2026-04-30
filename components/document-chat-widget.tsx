@@ -7,6 +7,7 @@ import ReactMarkdown from "react-markdown";
 import { useMutation } from "@tanstack/react-query";
 import axios from "axios";
 import { api } from "@/lib/api";
+import { READER_CHAT_ROOM, DEFAULT_CHAT_FONT, READER_CHAT_FONT, getReaderChatRoomStyles } from "@/lib/reader-chat-room";
 import { rehypeAppendStreamCursor } from "@/lib/rehype-append-stream-cursor";
 
 
@@ -30,6 +31,10 @@ interface ChatModelOption {
 interface DocumentChatWidgetProps {
   /** Current folder for document-scoped chat; use "" on the home library. */
   folderId?: string;
+  /** Z-index classes for fixed launcher + panel (use above fullscreen layers, e.g. `z-[70]`). */
+  stackZClass?: string;
+  /** Slightly larger panel + launcher (e.g. PDF book viewer). */
+  layout?: "default" | "reader";
 }
 
 const CHAT_MODEL_OPTIONS: readonly ChatModelOption[] = [
@@ -44,7 +49,11 @@ interface AssistantTypingState {
   referencedPages: ChatReferenceLink[];
 }
 
-export function DocumentChatWidget({ folderId = "" }: DocumentChatWidgetProps) {
+export function DocumentChatWidget({
+  folderId = "",
+  stackZClass = "z-40",
+  layout = "default",
+}: DocumentChatWidgetProps) {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
@@ -241,22 +250,49 @@ export function DocumentChatWidget({ folderId = "" }: DocumentChatWidgetProps) {
     CHAT_MODEL_OPTIONS.find((m) => m.id === selectedModelId)?.label ?? CHAT_MODEL_OPTIONS[0]?.label ?? "";
   const modelPickerDisabled = chatMutation.isPending || Boolean(assistantTyping);
 
+  const isReaderLayout = layout === "reader";
+  const readerChatGeom = isReaderLayout ? getReaderChatRoomStyles() : null;
+  const chatFont = isReaderLayout ? READER_CHAT_FONT : DEFAULT_CHAT_FONT;
+
   return (
     <>
             <button
               onClick={() => setIsChatOpen((previous) => !previous)}
               title={isChatOpen ? "Hide chatbot" : "Open chatbot"}
-              className="fixed bottom-5 right-5 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-[#1677ff] text-2xl text-white shadow-[0_12px_28px_rgba(22,119,255,0.45)] transition hover:scale-105 hover:bg-[#0f68e8]"
+              style={
+                isReaderLayout
+                  ? {
+                      ...readerChatGeom!.fab,
+                      fontSize: `${READER_CHAT_ROOM.fabIconFontRem}rem`,
+                    }
+                  : undefined
+              }
+              className={[
+                "fixed inline-flex items-center justify-center rounded-full bg-[#1677ff] text-white shadow-[0_12px_28px_rgba(22,119,255,0.45)] transition hover:scale-105 hover:bg-[#0f68e8]",
+                isReaderLayout ? "" : "bottom-5 right-5 h-14 w-14 text-sm font-bold tracking-wide",
+                stackZClass,
+              ]
+                .filter(Boolean)
+                .join(" ")}
             >
-              💬
+              <span className="font-bold tracking-wide leading-none">AI</span>
             </button>
 
             {isChatOpen && (
-              <div className="fixed bottom-20 right-5 z-40 flex h-[34rem] w-[23rem] flex-col overflow-hidden rounded-[2rem] border border-slate-200 bg-[#fafafc] shadow-[0_30px_80px_rgba(15,23,42,0.18)]">
+              <div
+                style={readerChatGeom?.panel}
+                className={[
+                  "fixed flex flex-col overflow-hidden rounded-[2rem] border border-slate-200 bg-[#fafafc] shadow-[0_30px_80px_rgba(15,23,42,0.18)]",
+                  isReaderLayout ? "" : "bottom-20 right-5 h-[34rem] w-[23rem]",
+                  stackZClass,
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
                 <div className="relative z-30 flex items-center justify-between overflow-visible border-b border-slate-200 bg-white px-4 py-3.5">
                   <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                    <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-700 text-sm font-semibold text-white">
-                      G
+                    <div className="inline-flex h-9 shrink-0 items-center justify-center rounded-lg bg-slate-700 px-2.5 text-xs font-bold tracking-wide text-white">
+                      AI
                     </div>
                     <div className="min-w-0 flex-1 leading-tight">
                       <div className="relative w-full min-w-0" ref={modelMenuRef}>
@@ -352,7 +388,10 @@ export function DocumentChatWidget({ folderId = "" }: DocumentChatWidgetProps) {
                 </div>
                 <div
                   ref={chatViewportRef}
-                  className="relative z-0 flex min-h-0 flex-1 flex-col space-y-2.5 overflow-y-auto bg-[#f3f4f8] px-3 py-4"
+                  className={[
+                    "relative z-0 flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#f3f4f8]",
+                    isReaderLayout ? "space-y-3 px-4 py-4" : "space-y-2.5 px-3 py-4",
+                  ].join(" ")}
                 >
                   {chatMessages.map((message) => {
                     const isTypingMessage = assistantTyping?.messageId === message.id;
@@ -363,8 +402,9 @@ export function DocumentChatWidget({ folderId = "" }: DocumentChatWidgetProps) {
                         className={["flex w-full shrink-0", message.role === "user" ? "justify-end" : "justify-start"].join(" ")}
                       >
                         <div
+                          style={{ fontSize: `${chatFont.messagePx}px` }}
                           className={[
-                            "w-fit max-w-[82%] rounded-[1.25rem] px-3.5 py-2.5 text-[13px] leading-relaxed shadow-sm",
+                            "w-fit max-w-[82%] rounded-[1.25rem] px-3.5 py-2.5 leading-relaxed shadow-sm",
                             message.role === "user"
                               ? "rounded-br-md bg-[#1980ff] text-white"
                               : "rounded-bl-md bg-[#e5e7ef] text-slate-800",
@@ -384,7 +424,10 @@ export function DocumentChatWidget({ folderId = "" }: DocumentChatWidgetProps) {
                               !isTypingMessage &&
                               message.referencedPages &&
                               message.referencedPages.length > 0 && (
-                                <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                                <div
+                                  className="mt-2 flex flex-wrap gap-1.5"
+                                  style={{ fontSize: `${chatFont.referenceLinkPx}px` }}
+                                >
                                   {message.referencedPages.map((reference) => (
                                     <Link
                                       key={`${message.id}-${reference.href}-${reference.label}`}
@@ -423,14 +466,26 @@ export function DocumentChatWidget({ folderId = "" }: DocumentChatWidgetProps) {
                 </div>
                 <form
                   onSubmit={submitChatMessage}
-                  className="border-t border-slate-100 bg-white/95 px-3 pb-3.5 pt-2.5 backdrop-blur"
+                  className={[
+                    "border-t border-slate-100 bg-white/95 backdrop-blur",
+                    isReaderLayout ? "px-4 pb-4 pt-3" : "px-3 pb-3.5 pt-2.5",
+                  ].join(" ")}
                 >
-                  <div className="group flex min-h-[48px] items-center gap-2 rounded-2xl border border-slate-200/90 bg-white px-3 py-1 shadow-sm transition focus-within:border-slate-300/80 focus-within:shadow-md focus-within:shadow-slate-900/5">
+                  <div
+                    className={[
+                      "group flex items-center gap-2 rounded-2xl border border-slate-200/90 bg-white px-3 shadow-sm transition focus-within:border-slate-300/80 focus-within:shadow-md focus-within:shadow-slate-900/5",
+                      isReaderLayout ? "min-h-[52px] py-1.5" : "min-h-[48px] py-1",
+                    ].join(" ")}
+                  >
                     <input
                       value={chatInput}
                       onChange={(event) => setChatInput(event.target.value)}
                       placeholder="Ask about your documents…"
-                      className="min-h-[40px] flex-1 border-0 bg-transparent py-2 text-[13px] leading-snug text-slate-800 outline-none ring-0 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+                      style={{ fontSize: `${chatFont.inputTextPx}px` }}
+                      className={[
+                        "flex-1 border-0 bg-transparent py-2 leading-snug text-slate-800 outline-none ring-0 placeholder:text-slate-400 focus:outline-none focus:ring-0",
+                        isReaderLayout ? "min-h-[44px]" : "min-h-[40px]",
+                      ].join(" ")}
                     />
                     <button
                       type={isConversationRunning ? "button" : "submit"}
@@ -440,7 +495,10 @@ export function DocumentChatWidget({ folderId = "" }: DocumentChatWidgetProps) {
                         (!chatInput.trim() || (CHAT_MODEL_OPTIONS.length > 0 && !selectedModelId))
                       }
                       title={isConversationRunning ? "Stop conversation" : "Send message"}
-                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500 text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                      className={[
+                        "inline-flex shrink-0 items-center justify-center rounded-xl bg-sky-500 text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500",
+                        isReaderLayout ? "h-10 w-10" : "h-9 w-9",
+                      ].join(" ")}
                     >
                       {isConversationRunning ? (
                         <span className="text-xs font-bold" aria-hidden>
@@ -596,10 +654,29 @@ function toReferenceLink(entry: unknown, index: number): ChatReferenceLink | nul
   return { href, label };
 }
 
+function ClipboardCopyIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+      />
+    </svg>
+  );
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
 function MessageCopyButton({ text, variant }: { text: string; variant: "user" | "assistant" }) {
   const [copied, setCopied] = useState(false);
   const isUser = variant === "user";
-  const label = copied ? "Copied" : "Copy";
 
   useEffect(() => {
     if (!copied) {
@@ -618,13 +695,16 @@ function MessageCopyButton({ text, variant }: { text: string; variant: "user" | 
     }
   };
 
+  const label = copied ? "Copied" : "Copy message";
+
   return (
     <button
       type="button"
       onClick={() => void onCopy()}
       aria-label={label}
+      title={label}
       className={[
-        "rounded-md px-2 py-0.5 text-[10px] font-semibold transition",
+        "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition",
         isUser
           ? copied
             ? "text-emerald-200"
@@ -634,7 +714,7 @@ function MessageCopyButton({ text, variant }: { text: string; variant: "user" | 
             : "text-slate-500 hover:text-slate-800",
       ].join(" ")}
     >
-      {label}
+      {copied ? <CheckIcon className="h-4 w-4" /> : <ClipboardCopyIcon className="h-4 w-4" />}
     </button>
   );
 }
@@ -709,12 +789,14 @@ function ChatCodeBlock({ codeText, role }: { codeText: string; role: ChatMessage
         <button
           type="button"
           onClick={() => void onCopy()}
+          aria-label={copied ? "Copied" : "Copy code"}
+          title={copied ? "Copied" : "Copy"}
           className={[
-            "rounded-md px-2 py-1 text-[11px] font-semibold transition",
+            "inline-flex h-8 w-8 items-center justify-center rounded-md transition",
             copied ? "bg-emerald-600 text-white" : "bg-black text-white hover:bg-slate-800",
           ].join(" ")}
         >
-          {copied ? "Copied" : "Copy"}
+          {copied ? <CheckIcon className="h-4 w-4" /> : <ClipboardCopyIcon className="h-4 w-4" />}
         </button>
       </div>
       <pre className="overflow-x-auto">
