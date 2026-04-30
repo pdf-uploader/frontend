@@ -439,7 +439,7 @@ export function PDFViewer({
           "pdf-book-viewport relative w-full min-w-0 max-w-full select-none overflow-x-hidden overflow-y-hidden",
           !isZoomedDocument ? "touch-pan-y" : "",
           isFullscreen
-            ? "flex h-full min-h-0 flex-1 flex-col rounded-none border-0 bg-slate-950 p-0"
+            ? "flex h-full min-h-0 flex-1 flex-col rounded-none border-0 bg-white p-0"
             : "mx-auto h-auto max-w-[1120px] rounded-2xl border border-slate-200 p-3 shadow-inner lg:h-[760px] lg:p-4",
         ].join(" ")}
         style={{
@@ -577,7 +577,7 @@ export function PDFViewer({
           className={[
             "absolute z-30 flex items-center gap-1.5 rounded-full border px-1.5 py-1 shadow-sm backdrop-blur",
             isFullscreen
-              ? "right-[max(0.75rem,env(safe-area-inset-right,0px))] top-[max(0.75rem,env(safe-area-inset-top,0px))] border-slate-600 bg-slate-900/85 text-white"
+              ? "right-[max(0.75rem,env(safe-area-inset-right,0px))] top-[max(0.75rem,env(safe-area-inset-top,0px))] border-slate-300 bg-white/95 text-slate-800 shadow-sm"
               : "right-3 top-3 border-slate-300 bg-white/95 text-slate-800",
           ].join(" ")}
         >
@@ -588,7 +588,7 @@ export function PDFViewer({
             disabled={!canZoomOut}
             className={[
               "h-7 w-7 rounded-full text-sm font-semibold transition",
-              isFullscreen ? "hover:bg-slate-700 disabled:text-slate-500" : "hover:bg-slate-100 disabled:text-slate-300",
+              "hover:bg-slate-100 disabled:text-slate-300",
             ].join(" ")}
             title="Zoom out"
             aria-label="Zoom out"
@@ -600,7 +600,7 @@ export function PDFViewer({
             onClick={resetZoom}
             className={[
               "rounded-full px-2.5 py-1 text-[11px] font-semibold transition",
-              isFullscreen ? "hover:bg-slate-700" : "hover:bg-slate-100",
+              "hover:bg-slate-100",
             ].join(" ")}
             title="Reset viewer zoom (combines toolbar zoom with visual viewport scale when the browser reports it)"
             aria-label={`Viewer zoom ${zoomPercent} percent; reset to fitted size`}
@@ -613,7 +613,7 @@ export function PDFViewer({
             disabled={!canZoomIn}
             className={[
               "h-7 w-7 rounded-full text-sm font-semibold transition",
-              isFullscreen ? "hover:bg-slate-700 disabled:text-slate-500" : "hover:bg-slate-100 disabled:text-slate-300",
+              "hover:bg-slate-100 disabled:text-slate-300",
             ].join(" ")}
             title="Zoom in"
             aria-label="Zoom in"
@@ -666,7 +666,7 @@ export function PDFViewer({
               isRightPage
             />
           ) : (
-            <div className={["hidden lg:block", isFullscreen ? "min-h-0 bg-[#020617]" : "rounded-xl border border-dashed border-slate-300 bg-white/70"].join(" ")} />
+            <div className={["hidden lg:block", isFullscreen ? "min-h-0 bg-white" : "rounded-xl border border-dashed border-slate-300 bg-white/70"].join(" ")} />
           )}
         </div>
 
@@ -935,7 +935,7 @@ function BookPage({
               : "h-[700px]",
         ].join(" ")}
         style={{
-          backgroundColor: isFullscreen ? "#020617" : pageSurface.pageCanvasColor,
+          backgroundColor: isFullscreen ? "#ffffff" : pageSurface.pageCanvasColor,
         }}
       >
         {!isFullscreen && isBookmarked && <BookmarkRibbon color={bookmarkColor} />}
@@ -1023,7 +1023,7 @@ function getPageSurfaceStyle(pageTone: PageToneId): { pageBodyColor: string; pag
     default:
       return {
         pageBodyColor: "#ffffff",
-        pageCanvasColor: "#f8fafc",
+        pageCanvasColor: "#ffffff",
       };
   }
 }
