@@ -303,3 +303,32 @@ a {
   transform: translateX(var(--consultant-logo-translate-x)) scale(var(--consultant-logo-scale));
   transform-origin: center center;
 }
+
+/* PDF viewer fullscreen: fill display; only notch safe-area — no extra top gutter */
+section.pdf-viewer-fullscreen-host:fullscreen {
+  box-sizing: border-box;
+  width: 100% !important;
+  min-width: 100% !important;
+  height: 100% !important;
+  min-height: 100dvh !important;
+  max-height: 100dvh !important;
+  margin: 0 !important;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+section.pdf-viewer-fullscreen-host:-webkit-full-screen {
+  box-sizing: border-box;
+  width: 100% !important;
+  min-width: 100% !important;
+  height: 100% !important;
+  min-height: 100dvh !important;
+  max-height: 100dvh !important;
+  margin: 0 !important;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+}

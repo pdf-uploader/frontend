@@ -362,7 +362,7 @@ export default function FileViewerPage() {
       typeof viewerSectionRef.current.requestFullscreen === "function" && typeof document.exitFullscreen === "function";
     if (canUseNativeFullscreen) {
       try {
-        await viewerSectionRef.current.requestFullscreen();
+        await viewerSectionRef.current.requestFullscreen({ navigationUI: "hide" });
         return;
       } catch {
         // Fall back to pseudo fullscreen for browsers like iPhone Safari.
@@ -446,6 +446,7 @@ export default function FileViewerPage() {
       onDoubleClick={onFullscreenSurfaceDoubleActivate}
       onTouchEndCapture={onFullscreenTouchEndCapture}
       className={[
+        "pdf-viewer-fullscreen-host",
         !isFullscreen ? "space-y-4" : "",
         isPseudoFullscreen
           ? "fixed inset-0 z-50 flex min-h-0 h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden bg-slate-950 text-white"
