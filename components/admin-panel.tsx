@@ -7,7 +7,6 @@ import { APP_PUBLIC_BASE_URL, APP_USERS_PORTAL_URL } from "@/lib/app-site";
 import { parseUserStatus } from "@/lib/user-status";
 import { UserStatusBadge } from "@/components/user-status-badge";
 import { DeleteUserConfirmDialog } from "@/components/delete-user-confirm-dialog";
-import { AdminAccountTypeBadge, AdminPasswordRowLine } from "@/components/admin-user-credentials";
 import { AppUser, Folder, UserStatus } from "@/lib/types";
 
 export function AdminPanel() {
@@ -109,6 +108,8 @@ export function AdminPanel() {
     setVisiblePasswords((prev) => ({ ...prev, [userId]: !prev[userId] }));
   };
 
+  const getUserPassword = (user: AppUser) => user.password ?? user.passwordHash ?? "";
+
   return (
     <>
       <div className="grid gap-6 lg:grid-cols-2">
@@ -144,6 +145,14 @@ export function AdminPanel() {
         {usersQuery.isLoading && <p className="text-xs text-slate-500">Loading users...</p>}
         <ul className="space-y-2 text-sm">
           {usersQuery.data?.map((user) => {
+            const userPassword = getUserPassword(user);
+            const isPasswordVisible = !!visiblePasswords[user.id];
+            const passwordText = userPassword
+              ? isPasswordVisible
+                ? userPassword
+                : "*".repeat(Math.max(userPassword.length, 8))
+              : "Not available";
+
             return (
               <li key={user.id} className="flex items-start justify-between rounded border border-slate-200 p-2">
                 <div className="pr-2">
@@ -152,7 +161,6 @@ export function AdminPanel() {
                     {user.username?.trim() ? (
                       <span className="text-slate-600">@{user.username.trim()}</span>
                     ) : null}
-                    <AdminAccountTypeBadge user={user} />
                     <UserStatusBadge status={user.status} />
                     <select
                       className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800"
@@ -174,11 +182,31 @@ export function AdminPanel() {
                       <option value="REJECTED">REJECTED</option>
                     </select>
                   </div>
-                  <AdminPasswordRowLine
-                    user={user}
-                    visiblePasswords={visiblePasswords}
-                    onToggleVisibility={togglePasswordVisibility}
-                  />
+                  <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
+                    <span>Password: {passwordText}</span>
+                    {userPassword ? (
+                      <button
+                        type="button"
+                        onClick={() => togglePasswordVisibility(user.id)}
+                        aria-label={isPasswordVisible ? "Hide password" : "Show password"}
+                        className="rounded p-1 text-slate-600 hover:bg-slate-100"
+                      >
+                        {isPasswordVisible ? (
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                            <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-5 0-9.27-3.11-11-8 1.05-2.97 3.14-5.3 5.76-6.67" />
+                            <path d="M1 1l22 22" />
+                            <path d="M9.88 9.88A3 3 0 0 0 14.12 14.12" />
+                            <path d="M10.73 5.08A10.94 10.94 0 0 1 12 4c5 0 9.27 3.11 11 8a10.94 10.94 0 0 1-4.07 5.22" />
+                          </svg>
+                        )}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 <button
                   type="button"

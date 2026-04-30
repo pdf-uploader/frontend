@@ -78,7 +78,6 @@ export function SocialAuthButtons({ mode, variant = "light" }: SocialAuthButtons
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Server-side OAuth: full navigation to API GET /auth/google — never fetch() here. */}
       <a href={googleHref} className={googleBtn} aria-label={googleLabel}>
         <GoogleGlyph className="h-5 w-5 shrink-0" />
         <span>{googleLabel}</span>
