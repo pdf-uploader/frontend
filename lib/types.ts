@@ -70,6 +70,15 @@ export interface AppUser {
   refreshToken?: string;
   accessToken?: string;
   createdAt?: string;
+  /** OAuth / SSO hints from API (admin listings, profile). */
+  authProvider?: string;
+  provider?: string;
+  oauthProvider?: string;
+  signInProvider?: string;
+  googleId?: string;
+  googleSub?: string;
+  /** When false, account has no local password (e.g. OAuth-only). */
+  hasLocalPassword?: boolean;
 }
 
 export interface BookmarkItem {
