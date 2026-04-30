@@ -6,7 +6,6 @@ import axios from "axios";
 import Link from "next/link";
 import { signUp } from "@/lib/api";
 import { AuthBrandedShell, AuthPageFooterLinks } from "@/components/auth-branded-shell";
-import { AuthProviderDivider, SocialAuthButtons } from "@/components/social-auth-buttons";
 import { SignupSuccessCheck } from "@/components/signup-success-check";
 
 type AuthStep = "email" | "password";
@@ -234,11 +233,6 @@ export default function SignUpPage() {
                 <h1 className="text-[1.6rem] font-semibold tracking-tight text-slate-900 sm:text-[1.8rem]">
                   {step === "email" ? "Create your account" : "Choose a password"}
                 </h1>
-                {step === "email" ? (
-                  <p className="mt-2.5 text-[15px] leading-relaxed text-slate-600">
-                    Use Google or your email. Access may require administrator approval.
-                  </p>
-                ) : null}
               </>
             ) : successRevealPhase === "details" ? (
               <h1 className="text-[1.6rem] font-semibold tracking-tight text-slate-900 sm:text-[1.8rem]">
@@ -287,43 +281,39 @@ export default function SignUpPage() {
           ) : null}
 
           {step === "email" && !registrationSucceeded && (
-            <>
-              <SocialAuthButtons mode="signup" />
-              <AuthProviderDivider label="or" />
-              <form onSubmit={onSubmitEmail} className="space-y-5">
-                <label className="sr-only" htmlFor="signup-email">
-                  Email address
-                </label>
-                <input
-                  id="signup-email"
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="Email address"
-                  className="auth-openai-input"
-                  required
-                />
-                <label className="sr-only" htmlFor="signup-username">
-                  Username
-                </label>
-                <input
-                  id="signup-username"
-                  type="text"
-                  autoComplete="username"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  placeholder="Username"
-                  className="auth-openai-input"
-                  required
-                  minLength={2}
-                  maxLength={64}
-                />
-                <button type="submit" className="auth-openai-btn-primary">
-                  Continue
-                </button>
-              </form>
-            </>
+            <form onSubmit={onSubmitEmail} className="space-y-5">
+              <label className="sr-only" htmlFor="signup-email">
+                Email address
+              </label>
+              <input
+                id="signup-email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="Email address"
+                className="auth-openai-input"
+                required
+              />
+              <label className="sr-only" htmlFor="signup-username">
+                Username
+              </label>
+              <input
+                id="signup-username"
+                type="text"
+                autoComplete="username"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                placeholder="Username"
+                className="auth-openai-input"
+                required
+                minLength={2}
+                maxLength={64}
+              />
+              <button type="submit" className="auth-openai-btn-primary">
+                Continue
+              </button>
+            </form>
           )}
 
           {step === "password" && !registrationSucceeded && (

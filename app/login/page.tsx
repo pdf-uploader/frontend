@@ -3,15 +3,14 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
-import axios from "axios";
 import Link from "next/link";
 import { getBackendErrorMessage } from "@/lib/api-errors";
 import { checkEmailRegisteredForLogin, signIn } from "@/lib/api";
 import { AuthBrandedShell, AuthPageFooterLinks } from "@/components/auth-branded-shell";
-import { AuthProviderDivider, SocialAuthButtons } from "@/components/social-auth-buttons";
-import { SignInBlockedByAccountStatusError } from "@/lib/sign-in-errors";
 
 const AUTH_CHECK_EMAIL_DISABLED = process.env.NEXT_PUBLIC_AUTH_CHECK_EMAIL_DISABLED === "true";
+
+const LOGIN_CREDENTIALS_ERROR = "Incorrect email or password.";
 
 type AuthStep = "email" | "password";
 
@@ -64,33 +63,33 @@ export default function LoginPage() {
     loginMutation.mutate();
   };
 
-  const loginErrorMessage = (() => {
-    if (!loginMutation.error) {
-      return "";
-    }
-    if (loginMutation.error instanceof SignInBlockedByAccountStatusError) {
-      return loginMutation.error.message;
-    }
-    if (axios.isAxiosError(loginMutation.error)) {
-      const apiMessage =
-        (loginMutation.error.response?.data as { message?: string } | undefined)?.message ??
-        loginMutation.error.message;
-      return apiMessage || "Login failed. Check credentials and try again.";
-    }
-    if (loginMutation.error instanceof Error) {
-      return loginMutation.error.message || "Login failed. Check credentials and try again.";
-    }
-    return "Login failed. Check credentials and try again.";
-  })();
-
   return (
     <AuthBrandedShell>
       <div className="flex flex-1 flex-col items-center justify-center px-4 pb-4 pt-6 sm:px-6 sm:pb-10 sm:pt-10">
         <div className="auth-openai-panel">
-          <div className="mb-5 flex justify-end sm:mb-4">
+          <div className="mb-5 flex items-center justify-between gap-2 sm:mb-4">
+            {step === "password" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setStep("email");
+                  setPassword("");
+                  setEmailLookupError("");
+                  loginMutation.reset();
+                }}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 outline-none transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-sky-500/50"
+                aria-label="Back to email"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+              </button>
+            ) : (
+              <span className="inline-flex h-9 w-9 shrink-0" aria-hidden />
+            )}
             <Link
               href="/"
-              className="rounded-full p-2 text-slate-400 outline-none transition hover:bg-slate-100 hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-sky-500/50"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-400 outline-none transition hover:bg-slate-100 hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-sky-500/50"
               aria-label="Close and return home"
             >
               <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
@@ -100,19 +99,17 @@ export default function LoginPage() {
           </div>
           <div className="mb-8 text-center">
             <h1 className="text-[1.6rem] font-semibold tracking-tight text-slate-900 sm:text-[1.8rem]">
-              {step === "email" ? "Sign in or sign up" : "Welcome back"}
+              {step === "email" ? "Login" : "Welcome back"}
             </h1>
             <p className="mt-2.5 text-[15px] leading-relaxed text-slate-600">
               {step === "email"
-                ? "Continue with Google or enter your work email to access the integrated manual workspace."
+                ? "Enter your work email to access the integrated manual workspace."
                 : `Enter your password for ${email}`}
             </p>
           </div>
 
           {step === "email" && (
             <>
-              <SocialAuthButtons mode="signin" />
-              <AuthProviderDivider label="or" />
               <form onSubmit={onSubmitEmail} className="space-y-5">
                 <label className="sr-only" htmlFor="login-email">
                   Email address
@@ -140,7 +137,7 @@ export default function LoginPage() {
               </form>
               {emailLookupError && (
                 <p className="mt-4 text-center text-sm text-rose-600" role="alert">
-                  {emailLookupError}{" "}
+                  {LOGIN_CREDENTIALS_ERROR}{" "}
                   <Link href="/signup" className="font-medium text-sky-700 underline-offset-2 hover:underline">
                     Create an account
                   </Link>
@@ -151,21 +148,6 @@ export default function LoginPage() {
 
           {step === "password" && (
             <form onSubmit={onSubmitPassword} className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2 text-[13px] text-slate-600">
-                <span className="truncate">{email}</span>
-                <button
-                  type="button"
-                  className="ml-auto shrink-0 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-sky-700 transition hover:border-slate-300 hover:bg-slate-50"
-                  onClick={() => {
-                    setStep("email");
-                    setPassword("");
-                    setEmailLookupError("");
-                    loginMutation.reset();
-                  }}
-                >
-                  Change email
-                </button>
-              </div>
               <label className="sr-only" htmlFor="login-password">
                 Password
               </label>
@@ -211,9 +193,6 @@ export default function LoginPage() {
                 />
                 Show password
               </label>
-              <p className="text-center text-[12px] leading-snug text-slate-500">
-                Before continuing, review how we handle data in our deployment policy for your organization.
-              </p>
               <button type="submit" disabled={loginMutation.isPending} className="auth-openai-btn-primary">
                 {loginMutation.isPending ? "Signing in…" : "Sign in"}
               </button>
@@ -221,7 +200,9 @@ export default function LoginPage() {
           )}
 
           {loginMutation.error && step === "password" && (
-            <p className="mt-4 text-center text-sm text-rose-600">{loginErrorMessage}</p>
+            <p className="mt-4 text-center text-sm text-rose-600" role="alert">
+              {LOGIN_CREDENTIALS_ERROR}
+            </p>
           )}
 
           <p className="mt-9 text-center text-[13px] text-slate-500">
