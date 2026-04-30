@@ -7,6 +7,7 @@ import Link from "next/link";
 import { getBackendErrorMessage } from "@/lib/api-errors";
 import { checkEmailRegisteredForLogin, signIn } from "@/lib/api";
 import { AuthBrandedShell, AuthPageFooterLinks } from "@/components/auth-branded-shell";
+import { SignInBlockedByAccountStatusError } from "@/lib/sign-in-errors";
 
 const AUTH_CHECK_EMAIL_DISABLED = process.env.NEXT_PUBLIC_AUTH_CHECK_EMAIL_DISABLED === "true";
 
@@ -201,7 +202,9 @@ export default function LoginPage() {
 
           {loginMutation.error && step === "password" && (
             <p className="mt-4 text-center text-sm text-rose-600" role="alert">
-              {LOGIN_CREDENTIALS_ERROR}
+              {loginMutation.error instanceof SignInBlockedByAccountStatusError
+                ? loginMutation.error.message
+                : LOGIN_CREDENTIALS_ERROR}
             </p>
           )}
 

@@ -19,6 +19,8 @@ export function Navbar() {
   const isUsersRoute = pathname.startsWith("/users");
   const canManageUsers = isAdminUser(user);
   const roleLabel = canManageUsers ? "ADMIN" : "USER";
+  const homeScreenUserBadge =
+    canManageUsers ? roleLabel : (user?.username?.trim() || user?.email?.split("@")[0]?.trim() || "User");
 
   const logoutMutation = useMutation({
     mutationFn: signOut,
@@ -68,7 +70,7 @@ export function Navbar() {
             </Link>
           ) : (
             <p className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[0.65rem] font-semibold tracking-wide text-emerald-800 sm:px-3 sm:text-xs">
-              {roleLabel}
+              {homeScreenUserBadge}
             </p>
           )}
           {canManageUsers && (

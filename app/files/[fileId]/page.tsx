@@ -248,7 +248,6 @@ export default function FileViewerPage() {
 
   useEffect(() => {
     setHoveredPanel(null);
-    setPinnedPanel(null);
     setShowFullscreenMenu(false);
   }, [isFullscreen]);
 
@@ -377,7 +376,8 @@ export default function FileViewerPage() {
   const canChooseBookmarkPage = visiblePages.length > 0;
   const bookmarkButtonLabel = "Bookmark";
   const bookmarkButtonStyle = getBookmarkButtonStyle(bookmarkColor, isSelectedPageBookmarked);
-  const showBookmarkPagePicker = (hoveredPanel === "bookmark" || pinnedPanel === "bookmark") && canChooseBookmarkPage;
+  /** Pinned only — avoids hover + dropdown gap closing the picker; closes when Bookmark is clicked again. */
+  const showBookmarkPagePicker = pinnedPanel === "bookmark" && canChooseBookmarkPage;
   const showBookmarkSettings = hoveredPanel === "settings" || pinnedPanel === "settings";
 
   const onBookmarkPrimaryAction = () => {
@@ -446,16 +446,20 @@ export default function FileViewerPage() {
       onDoubleClick={onFullscreenSurfaceDoubleActivate}
       onTouchEndCapture={onFullscreenTouchEndCapture}
       className={[
-        "space-y-4",
-        isPseudoFullscreen ? "fixed inset-0 z-50 flex h-[100dvh] overflow-hidden bg-slate-950 text-white" : "",
-        isNativeFullscreen && !isPseudoFullscreen ? "flex h-screen overflow-hidden bg-slate-950 text-white" : "",
+        !isFullscreen ? "space-y-4" : "",
+        isPseudoFullscreen
+          ? "fixed inset-0 z-50 flex min-h-0 h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden bg-slate-950 text-white"
+          : "",
+        isNativeFullscreen && !isPseudoFullscreen
+          ? "flex min-h-0 h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden bg-slate-950 text-white"
+          : "",
       ].join(" ")}
     >
       <div
         className={[
           "min-w-0 max-w-full rounded-xl border p-3 shadow-sm sm:p-4",
           isFullscreen
-            ? "relative flex h-full w-full flex-col border-0 bg-slate-950 p-0 shadow-none"
+            ? "relative flex min-h-0 flex-1 flex-col border-0 bg-slate-950 p-0 shadow-none"
             : "border-slate-200 bg-white",
         ].join(" ")}
       >
@@ -471,11 +475,7 @@ export default function FileViewerPage() {
               ].join(" ")}
             >
               <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/70 p-1.5 backdrop-blur">
-                <div
-                  className="relative"
-                  onMouseEnter={() => setHoveredPanel("bookmark")}
-                  onMouseLeave={() => setHoveredPanel((previous) => (previous === "bookmark" ? null : previous))}
-                >
+                <div className="relative">
                   <button
                     type="button"
                     onClick={onBookmarkPrimaryAction}
@@ -602,11 +602,7 @@ export default function FileViewerPage() {
                   </button>
                 </div>
               )}
-              <div
-                className="relative"
-                onMouseEnter={() => setHoveredPanel("bookmark")}
-                onMouseLeave={() => setHoveredPanel((previous) => (previous === "bookmark" ? null : previous))}
-              >
+              <div className="relative">
                 <button
                   type="button"
                   onClick={onBookmarkPrimaryAction}
@@ -748,7 +744,9 @@ export default function FileViewerPage() {
         <div
           className={[
             "min-w-0 max-w-full overflow-x-clip rounded-xl border border-slate-200 bg-slate-100 p-2 sm:p-4",
-            isFullscreen ? "flex min-h-0 flex-1 rounded-none border-0 bg-slate-950 p-0" : "min-h-[58vh] sm:min-h-[70vh]",
+            isFullscreen
+              ? "flex min-h-0 flex-1 flex-col rounded-none border-0 bg-slate-950 p-0"
+              : "min-h-[58vh] sm:min-h-[70vh]",
           ].join(" ")}
         >
           {blobUrl && (

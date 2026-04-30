@@ -50,6 +50,8 @@ export function PDFViewer({
   /** Per-spread card chrome (borders + padding) so the PDF width fits two columns. */
   const DESKTOP_SPREAD_PAGE_FRAME = 20;
   const MOBILE_PAGE_MAX_WIDTH = 700;
+  /** Top lane in fullscreen: keeps zoom HUD clear of pages and feeds height-based spread scaling. */
+  const FULLSCREEN_TOP_LANE_PX = 52;
   const MIN_ZOOM = 1;
   const MAX_ZOOM = 3;
   const ZOOM_STEP = 0.2;
@@ -93,6 +95,9 @@ export function PDFViewer({
 
   const pageWidth = useMemo(() => {
     const z = Math.max(pinchZoomScale, 0.01);
+    const fullscreenPdfLaneHeight =
+      isFullscreen && viewportHeight > 0 ? Math.max(0, viewportHeight - FULLSCREEN_TOP_LANE_PX - 12) : 0;
+
     if (bookContentWidth <= 0) {
       return BOOK_PAGE_MAX_WIDTH;
     }
@@ -105,21 +110,33 @@ export function PDFViewer({
       );
     }
     if (isFullscreen) {
-      return clampNumber(
-        Math.floor((bookContentWidth - 8) / (2 * z * desktopFullscreenPageScale)),
-        320,
-        1800
+      const widthCap = Math.floor((bookContentWidth - 8) / (2 * z * desktopFullscreenPageScale));
+      if (fullscreenPdfLaneHeight <= 0) {
+        return clampNumber(widthCap, 320, 1800);
+      }
+      /** Typical portrait PDF height/width; caps scale on short viewports so spreads are not clipped. */
+      const pdfAspectHeightOverWidth = 1.42;
+      const heightCap = Math.floor(
+        fullscreenPdfLaneHeight / (pdfAspectHeightOverWidth * desktopFullscreenPageScale * z)
       );
+      return clampNumber(Math.min(widthCap, heightCap), 320, 1800);
     }
     return clampNumber(
-      Math.floor(
-        (bookContentWidth - BOOK_GRID_GAP_PX - 2 * DESKTOP_SPREAD_PAGE_FRAME) / (2 * z)
-      ),
+      Math.floor((bookContentWidth - BOOK_GRID_GAP_PX - 2 * DESKTOP_SPREAD_PAGE_FRAME) / (2 * z)),
       200,
       BOOK_PAGE_MAX_WIDTH
     );
-  }, [bookContentWidth, isSinglePageView, isFullscreen, pinchZoomScale, desktopFullscreenPageScale]);
-  const pageHeight = shouldFitToFullscreenHeight ? clampNumber(Math.floor(viewportHeight - 6), 240, 2600) : undefined;
+  }, [
+    bookContentWidth,
+    isSinglePageView,
+    isFullscreen,
+    pinchZoomScale,
+    desktopFullscreenPageScale,
+    viewportHeight,
+  ]);
+  const pageHeight = shouldFitToFullscreenHeight
+    ? clampNumber(Math.floor(Math.max(0, viewportHeight - FULLSCREEN_TOP_LANE_PX - 12)), 240, 2600)
+    : undefined;
 
   useEffect(() => {
     if (!isSinglePageFullscreen) {
@@ -343,17 +360,21 @@ export function PDFViewer({
         onNumPagesChange?.(pages);
       }}
       loading={<PdfDocumentRenderLoading />}
-      className={isFullscreen ? "flex h-full w-full min-w-0 max-w-full flex-col" : "w-full min-w-0 max-w-full space-y-4"}
+      className={
+        isFullscreen
+          ? "flex h-full min-h-0 w-full max-w-full flex-1 flex-col"
+          : "w-full min-w-0 max-w-full space-y-4"
+      }
     >
       <div
         ref={viewportRef}
         data-pdf-book-viewport
         className={[
-          "pdf-book-viewport relative w-full min-w-0 max-w-full select-none border overflow-x-hidden overflow-y-hidden",
+          "pdf-book-viewport relative w-full min-w-0 max-w-full select-none overflow-x-hidden overflow-y-hidden",
           !isZoomedDocument ? "touch-pan-y" : "",
           isFullscreen
-            ? "h-full w-full min-h-0 rounded-none border-0 bg-slate-950 p-0"
-            : "mx-auto h-auto w-full min-w-0 max-w-[1120px] rounded-2xl border-slate-200 p-3 shadow-inner lg:h-[760px] lg:p-4",
+            ? "flex h-full min-h-0 flex-1 flex-col rounded-none border-0 bg-slate-950 p-0"
+            : "mx-auto h-auto max-w-[1120px] rounded-2xl border border-slate-200 p-3 shadow-inner lg:h-[760px] lg:p-4",
         ].join(" ")}
         style={{
           WebkitUserSelect: "none",
@@ -481,6 +502,9 @@ export function PDFViewer({
           setTouchStartX(null);
         }}
       >
+        {isFullscreen ? (
+          <div className="w-full shrink-0" style={{ height: FULLSCREEN_TOP_LANE_PX }} aria-hidden />
+        ) : null}
         {!isSinglePageView && <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/70" />}
         {!isSinglePageView && (
           <div className="pointer-events-none absolute inset-y-0 left-1/2 w-10 -translate-x-1/2 bg-gradient-to-r from-slate-300/25 via-slate-400/30 to-slate-300/25 blur-lg" />
@@ -488,8 +512,10 @@ export function PDFViewer({
         <div
           data-pdf-zoom-controls
           className={[
-            "absolute right-3 top-3 z-30 flex items-center gap-1.5 rounded-full border px-1.5 py-1 shadow-sm backdrop-blur",
-            isFullscreen ? "border-slate-600 bg-slate-900/85 text-white" : "border-slate-300 bg-white/95 text-slate-800",
+            "absolute z-30 flex items-center gap-1.5 rounded-full border px-1.5 py-1 shadow-sm backdrop-blur",
+            isFullscreen
+              ? "right-[max(0.75rem,env(safe-area-inset-right,0px))] top-[max(0.75rem,env(safe-area-inset-top,0px))] border-slate-600 bg-slate-900/85 text-white"
+              : "right-3 top-3 border-slate-300 bg-white/95 text-slate-800",
           ].join(" ")}
         >
           <span className="px-1 text-[11px] font-semibold">🔎</span>
@@ -535,7 +561,7 @@ export function PDFViewer({
         <div
           className={[
             "grid min-h-0 w-full min-w-0 max-w-full grid-cols-1 gap-3 overflow-hidden lg:grid-cols-2",
-            isFullscreen ? "h-full min-h-0 gap-0" : "",
+            isFullscreen ? "min-h-0 flex-1 gap-0" : "",
           ].join(" ")}
         >
           <BookPage

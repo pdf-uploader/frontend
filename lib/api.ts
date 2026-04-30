@@ -229,6 +229,100 @@ export async function patchUserStatus(userId: string, status: UserStatus): Promi
   await api.patch(`/users/${userId}`, { status });
 }
 
+function collectBackendAuthErrorText(data: unknown): string {
+  if (typeof data === "string") {
+    return data;
+  }
+  if (!data || typeof data !== "object") {
+    return "";
+  }
+  const o = data as Record<string, unknown>;
+  const parts: string[] = [];
+  for (const key of ["message", "error", "detail", "description", "reason"] as const) {
+    const v = o[key];
+    if (typeof v === "string" && v.trim()) {
+      parts.push(v);
+    }
+  }
+  const nested = o.errors ?? o.validationErrors;
+  if (Array.isArray(nested)) {
+    for (const item of nested) {
+      if (typeof item === "string") {
+        parts.push(item);
+      } else if (item && typeof item === "object") {
+        const m = (item as Record<string, unknown>).message ?? (item as Record<string, unknown>).msg;
+        if (typeof m === "string") {
+          parts.push(m);
+        }
+      }
+    }
+  }
+  return parts.join(" ").trim();
+}
+
+/** Backend rejected login because the account is not verified / not approved (HTTP error body). */
+function signInBlockedFromAuthHttpError(error: unknown): SignInBlockedByAccountStatusError | undefined {
+  if (!axios.isAxiosError(error) || error.response == null) {
+    return undefined;
+  }
+  const { data } = error.response;
+  const blob = collectBackendAuthErrorText(data).toLowerCase();
+
+  const statusFromBody = parseAccountStatusFromAuthPayload(data);
+  if (statusFromBody && isLoginBlockedAccountStatus(statusFromBody)) {
+    return new SignInBlockedByAccountStatusError(statusFromBody);
+  }
+
+  if (data && typeof data === "object") {
+    const code = String((data as Record<string, unknown>).code ?? "").toUpperCase();
+    if (
+      code === "USER_NOT_VERIFIED" ||
+      code === "EMAIL_NOT_VERIFIED" ||
+      code === "ACCOUNT_NOT_VERIFIED" ||
+      code === "ACCOUNT_PENDING" ||
+      code === "NOT_APPROVED" ||
+      code === "ACCOUNT_NOT_APPROVED"
+    ) {
+      return new SignInBlockedByAccountStatusError("WAITING");
+    }
+    if (code === "ACCOUNT_REJECTED") {
+      return new SignInBlockedByAccountStatusError("REJECTED");
+    }
+  }
+
+  if (/rejected|your account has been rejected/i.test(blob)) {
+    return new SignInBlockedByAccountStatusError("REJECTED");
+  }
+
+  const pendingHints =
+    /not verified|user not verified|email not verified|account not verified|unverified|pending approval|awaiting approval|not activated|account not approved|waiting for approval|administrator approval|pending verification|verify your email|must be verified|approval required|account is pending|pending admin/i;
+
+  if (pendingHints.test(blob)) {
+    return new SignInBlockedByAccountStatusError("WAITING");
+  }
+
+  return undefined;
+}
+
+/** True when JSON explicitly marks the user as unverified (email/account) and we should not open a session. */
+function payloadIndicatesUnverifiedAccount(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+  const falsy = (v: unknown) =>
+    v === false || (typeof v === "string" && v.trim().toLowerCase() === "false");
+
+  const scan = (o: Record<string, unknown>) =>
+    falsy(o.verified) || falsy(o.isVerified) || falsy(o.emailVerified) || falsy(o.userVerified);
+
+  const r = payload as Record<string, unknown>;
+  if (scan(r)) {
+    return true;
+  }
+  const user = r.user;
+  return Boolean(user && typeof user === "object" && scan(user as Record<string, unknown>));
+}
+
 export async function signIn(email: string, password: string): Promise<SignInResponse> {
   try {
     const response = await api.post<SignInResponse>(AUTH_ROUTES.signIn, { email, password });
@@ -250,6 +344,12 @@ export async function signIn(email: string, password: string): Promise<SignInRes
       throw new SignInBlockedByAccountStatusError(effectiveStatus as UserStatus);
     }
 
+    if (effectiveStatus !== "APPROVED" && payloadIndicatesUnverifiedAccount(payload)) {
+      authStore.clear();
+      await signOut();
+      throw new SignInBlockedByAccountStatusError("WAITING");
+    }
+
     authStore.setRefreshToken(refreshToken ?? null);
     authStore.setAccessToken(accessToken ?? null);
 
@@ -262,6 +362,15 @@ export async function signIn(email: string, password: string): Promise<SignInRes
       role: resolvedUser.role,
     };
   } catch (error) {
+    if (error instanceof SignInBlockedByAccountStatusError) {
+      throw error;
+    }
+    const blocked = signInBlockedFromAuthHttpError(error);
+    if (blocked) {
+      authStore.clear();
+      await signOut();
+      throw blocked;
+    }
     if (axios.isAxiosError<{ message?: string }>(error)) {
       const apiMessage = error.response?.data?.message ?? error.message;
       throw new Error(apiMessage || "Login failed. Check credentials and try again.");
