@@ -65,6 +65,20 @@ export interface AppUser {
   /** Display / login handle — aligned with POST signup payloads. */
   username?: string;
   status?: UserStatus;
+  /**
+   * How the user authenticates — e.g. `LOCAL` | `GOOGLE`.
+   * Backend should set for OAuth accounts so the admin UI can hide local password fields.
+   */
+  authProvider?: string;
+  /** Alternate API key for the same concept as `authProvider`. */
+  provider?: string;
+  oauthProvider?: string;
+  signInProvider?: string;
+  /** Present when linked to Google OAuth (some APIs use `googleSub` instead). */
+  googleId?: string;
+  googleSub?: string;
+  /** When false, user has no local password (OAuth / SSO only) — admin UI must not show password. */
+  hasLocalPassword?: boolean;
   password?: string;
   passwordHash?: string;
   refreshToken?: string;

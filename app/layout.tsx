@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "@/app/globals.css";
 import { AppProviders } from "@/lib/providers";
+import { OAuthFlashBanner } from "@/components/oauth-flash-banner";
 import { ProtectedRoute } from "@/components/protected-route";
 import { Navbar } from "@/components/navbar";
 import { Suspense } from "react";
@@ -41,6 +42,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <PWARegister />
           <ProtectedRoute>
             <Navbar />
+            <OAuthFlashBanner />
             <Suspense fallback={<main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>}>
               <MainShell>{children}</MainShell>
             </Suspense>

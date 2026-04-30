@@ -1,12 +1,29 @@
 /**
  * Social login entry URLs (backend OAuth redirects).
  * Express: `GET /auth/google` → `passport.authenticate("google", …)`.
- * When `NEXT_PUBLIC_AUTH_GOOGLE_URL` is unset, the UI shows a disabled placeholder (same pattern as WhatsApp).
+ *
+ * Google Cloud Console must list the API callback exactly, e.g.
+ * `http://localhost:4000/auth/google/callback`. The browser should open the
+ * **start** route `/auth/google` on the API origin (same host/port as that callback).
  */
 
-export function getGoogleAuthUrl(): string | null {
+import { AUTH_ROUTES } from "@/lib/api";
+import { getPublicApiOrigin } from "@/lib/api-origin";
+
+/** Normalize mistaken paste of the Console “redirect URI” into the link we use to start OAuth. */
+function googleOAuthStartUrl(url: string): string {
+  const trimmed = url.trim().replace(/\/$/, "");
+  if (trimmed.endsWith("/auth/google/callback")) {
+    return trimmed.slice(0, -"/callback".length);
+  }
+  return trimmed;
+}
+
+/** Google OAuth entry URL — optional override via NEXT_PUBLIC_AUTH_GOOGLE_URL */
+export function getGoogleAuthUrl(): string {
   const configured = process.env.NEXT_PUBLIC_AUTH_GOOGLE_URL?.trim() ?? "";
-  return configured.length > 0 ? configured : null;
+  const raw = configured.length > 0 ? configured : `${getPublicApiOrigin()}${AUTH_ROUTES.googleStart}`;
+  return googleOAuthStartUrl(raw);
 }
 
 /** WhatsApp invite or OAuth-style URL; when absent the UI shows a disabled placeholder. */

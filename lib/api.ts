@@ -1,4 +1,5 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
+import { getPublicApiOrigin } from "@/lib/api-origin";
 import { getBrowserCookie } from "@/lib/auth-cookies";
 import { resolveAuthUserFromCredentialResponse } from "@/lib/auth-user";
 import { SignInBlockedByAccountStatusError } from "@/lib/sign-in-errors";
@@ -9,12 +10,15 @@ import {
 import { authStore } from "@/lib/auth-store";
 import { BookmarkItem, SignInResponse, UserStatus } from "@/lib/types";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_EXPRESS_SERVER_URL ?? "http://localhost:4000";
+/** Backend `CLIENT_URL`. Axios uses `withCredentials` so httpOnly auth cookies hit this origin. */
+const API_BASE_URL = getPublicApiOrigin();
 const AUTH_SIGN_OUT_ENDPOINT = process.env.NEXT_PUBLIC_AUTH_SIGNOUT_ENDPOINT?.trim() ?? "";
 const AUTH_SIGN_OUT_METHOD = (process.env.NEXT_PUBLIC_AUTH_SIGNOUT_METHOD ?? "delete").toLowerCase();
 
 /** Express auth routes — keep aligned with backend. */
 export const AUTH_ROUTES = {
+  /** Full-page navigation only — do not start OAuth with fetch(). */
+  googleStart: "/auth/google",
   signIn: "/auth/signin",
   signUp: "/auth/signup",
   refresh: "/auth/refresh",
