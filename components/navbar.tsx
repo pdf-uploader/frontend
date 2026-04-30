@@ -5,17 +5,17 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import { signOut } from "@/lib/api";
-import { isAdminUser } from "@/lib/auth-user";
 import { hasAuthSession } from "@/lib/auth-session";
+import { isAdminUser } from "@/lib/auth-user";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { BrandedSystemNavbarTitle } from "@/components/branded-logos-shell";
-import { MOWT_WEBSITE_URL } from "@/lib/branding-links";
+import { KOICA_WEBSITE_URL, MOWT_WEBSITE_URL } from "@/lib/branding-links";
 
 export function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
   const auth = useAuth();
-  const { user } = auth;
+  const { user, token } = auth;
   const isUsersRoute = pathname.startsWith("/users");
   const canManageUsers = isAdminUser(user);
   const roleLabel = canManageUsers ? "ADMIN" : "USER";
@@ -38,7 +38,7 @@ export function Navbar() {
           href={MOWT_WEBSITE_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="relative ml-4 block h-[5.25rem] w-[min(16.5rem,46vw)] min-w-0 shrink-0 pl-5 min-[400px]:ml-5 min-[400px]:pl-6 sm:ml-7 sm:h-24 sm:w-[min(19.5rem,50vw)] sm:pl-10 md:ml-10 md:pl-14 lg:ml-12 lg:pl-16 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2"
+          className="relative block h-[5.25rem] w-[min(16.5rem,46vw)] min-w-0 shrink-0 pl-1 min-[400px]:pl-1.5 sm:h-24 sm:w-[min(19.5rem,50vw)] sm:pl-2 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2"
           aria-label="Ministry of Works and Transport — visit works.go.ug"
         >
           <Image
@@ -92,6 +92,14 @@ export function Navbar() {
           >
             {logoutMutation.isPending ? "Logging out..." : "Logout"}
           </button>
+          <a
+            href={KOICA_WEBSITE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="relative block h-10 w-20 shrink-0 self-center pr-0 min-[400px]:pr-0.5 sm:h-12 sm:w-28 sm:pr-1 md:h-14 md:w-32 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2"
+            aria-label="KOICA — visit koica.go.kr"
+          >
+          </a>
         </div>
       </div>
     </header>

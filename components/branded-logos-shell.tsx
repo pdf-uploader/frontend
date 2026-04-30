@@ -125,7 +125,7 @@ export function BrandedTopLogos({
         <h1 className={["[grid-area:title] col-span-2 sm:col-span-1", headlineToneClass].join(" ")}>
           {headline}
         </h1>
-        <div className="[grid-area:actions] flex max-w-[min(100%,22rem)] flex-wrap items-center justify-end gap-1.5 sm:min-w-0 sm:max-w-none sm:gap-2 md:gap-2.5">
+        <div className="branded-header-auth-actions [grid-area:actions] flex max-w-[min(100%,22rem)] flex-wrap items-center justify-end gap-1.5 sm:min-w-0 sm:max-w-none sm:gap-2 md:gap-2.5">
           {authLinks && (
             <>
               <Link href={authLinks.loginHref} className={tone === "dark" ? loginPairDark : loginPairLight}>
@@ -176,13 +176,13 @@ export function BrandedBottomConsultants({
       <div className="w-full px-2 py-3 sm:px-4 sm:py-4 md:px-6">
         <div className="flex w-full justify-center overflow-x-auto [-webkit-overflow-scrolling:touch]">
           <div className="flex flex-nowrap items-center justify-center gap-1.5 px-1 py-0.5 sm:gap-2 md:gap-2.5">
-            <div className="relative h-11 w-[min(72vw,34rem)] shrink-0 sm:h-[4rem] sm:w-[min(68vw,38rem)] md:h-[4.25rem] md:w-[min(62vw,44rem)] lg:h-[4.5rem] lg:w-[min(58vw,52rem)]">
+            <div className="consultant-companies-logo-shell">
               <Image
                 src="/logo/consultant-companies.png"
                 alt="Consultant partner companies"
                 fill
                 className="object-contain object-center"
-                sizes="(max-width:768px) 75vw, 840px"
+                sizes="(max-width: 640px) 72vw, (max-width: 1024px) 65vw, 832px"
               />
             </div>
             <a
@@ -192,13 +192,6 @@ export function BrandedBottomConsultants({
               className="relative h-9 w-[6.5rem] shrink-0 sm:h-11 sm:w-32 md:h-12 md:w-36 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2"
               aria-label="KOICA — visit koica.go.kr"
             >
-              <Image
-                src="/logo/KOICA.png"
-                alt=""
-                fill
-                className="object-contain object-center"
-                sizes="160px"
-              />
             </a>
           </div>
         </div>

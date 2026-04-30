@@ -53,9 +53,8 @@ function SignupPasswordRule({
         ) : null}
       </span>
       <span
-        className={`text-[13px] leading-snug ${
-          ok ? "font-medium text-slate-900" : failed ? "font-semibold text-rose-600" : "text-slate-500"
-        }`}
+        className={`text-[13px] leading-snug ${ok ? "font-medium text-slate-900" : failed ? "font-semibold text-rose-600" : "text-slate-500"
+          }`}
       >
         <span className="sr-only">{ok ? "Met: " : failed ? "Missing: " : "Not met: "}</span>
         {label}
