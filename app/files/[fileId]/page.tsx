@@ -121,10 +121,12 @@ export default function FileViewerPage() {
   }, [fileId]);
 
   /**
-   * Browser → EC2 directly (mirrors `/folders`, `/files/:id`): `withCredentials` carries the EC2-domain
-   * auth cookies and the axios interceptor adds `Authorization`. Vercel never sees this traffic, so it
-   * cannot replace `Authorization` with its internal proxy JWT. The returned presigned S3 URL is fetched
-   * with no auth (SigV4 lives in the query string).
+   * Two-step PDF load:
+   *   1. Browser → EC2 (`/files/pdf/:id`) — direct call, mirrors `/folders` / `/files/:id` so auth
+   *      cookies + Bearer attach normally and Vercel's edge cannot replace `Authorization`.
+   *   2. Browser → `/api/pdf-bytes?url=<presigned>` — same-origin passthrough. We do not fetch
+   *      the S3 URL directly because S3 returns no `Access-Control-Allow-Origin` for cross-origin
+   *      `fetch()`, even though the URL is public when opened in a tab.
    */
   useEffect(() => {
     if (!fileId) {
@@ -137,7 +139,7 @@ export default function FileViewerPage() {
       try {
         const { url } = await getPdfViewerPresignedUrl(fileId, ctrl.signal);
         if (!cancelled) {
-          setViewerPdfSrc(url);
+          setViewerPdfSrc(`/api/pdf-bytes?url=${encodeURIComponent(url)}`);
         }
       } catch (e) {
         if (cancelled || ctrl.signal.aborted) {
