@@ -25,21 +25,51 @@ function parseAuthorizationFromVercelScHeaders(raw: string | null): string | nul
   return null;
 }
 
-/** Bearer (+ optional duplicates) forwarded from Next Route Handler → Express presign route. */
+/**
+ * Bearer (+ optional duplicates) forwarded from Next Route Handler → Express presign route.
+ *
+ * Read the custom header **first**: Vercel's edge proxy overwrites `Authorization` with its own
+ * internal OIDC JWT (`iss: "serverless"`, `domain: "<vercel-domain>"`), which would be forwarded
+ * verbatim and fail `jsonwebtoken.verify()` on EC2 with `invalid signature`. Custom headers like
+ * `x-pdf-stream-auth` pass through untouched.
+ * @see https://stackoverflow.com/questions/70996838/vercel-production-branch-is-stripping-authorization-header-on-post-to-serverless
+ */
 export function authorizationForPdfStreamUpstream(incoming: IncomingRequestHeaders): string | null {
-  const std = incoming.get("authorization")?.trim();
-  if (std) {
-    return std;
-  }
   const dup = incoming.get(PDF_STREAM_PROXY_AUTH_HEADER)?.trim();
   if (dup) {
     return dup;
+  }
+  const std = incoming.get("authorization")?.trim();
+  if (std && !looksLikeVercelInternalBearer(std)) {
+    return std;
   }
   const forwarded = incoming.get("x-forwarded-authorization")?.trim();
   if (forwarded) {
     return forwarded;
   }
   return parseAuthorizationFromVercelScHeaders(incoming.get("x-vercel-sc-headers"));
+}
+
+/** Heuristic: Vercel proxy bearer claims `iss: "serverless"` (or contains `deploymentId`). */
+function looksLikeVercelInternalBearer(value: string): boolean {
+  const token = value.replace(/^Bearer\s+/i, "").trim();
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return false;
+  }
+  try {
+    const json = Buffer.from(parts[1], "base64url").toString("utf8");
+    const payload = JSON.parse(json) as Record<string, unknown>;
+    if (payload.iss === "serverless") {
+      return true;
+    }
+    if (typeof payload.deploymentId === "string") {
+      return true;
+    }
+  } catch {
+    //
+  }
+  return false;
 }
 
 /** Browser → `/api/files/…/pdf-stream`: send both headers so ingress cannot strip auth entirely. */
