@@ -1,8 +1,11 @@
 import axios, { AxiosError } from "axios";
 import { NextRequest, NextResponse } from "next/server";
-import { api } from "@/lib/api";
+import { authorizationForPdfStreamUpstream } from "@/lib/pdf-stream-proxy-auth";
 
 export const dynamic = "force-dynamic";
+
+/** No shared `api` instance: interceptors use client `authStore` (always empty server-side); `withCredentials` is meaningless in Node toward EC2. */
+const upstreamClient = axios.create({ timeout: 120_000 });
 
 function readPresignedUrlFromJson(data: unknown): string {
   if (data == null || typeof data !== "object") {
@@ -16,8 +19,8 @@ function readPresignedUrlFromJson(data: unknown): string {
 }
 
 /**
- * Matches server reachability logic; `api` defaults use `NEXT_PUBLIC_EXPRESS_SERVER_URL` only —
- * Override `baseURL` per request when `EXPRESS_SERVER_URL` is set (e.g. Vercel → private backend).
+ * Matches server reachability logic; axios defaults elsewhere use `NEXT_PUBLIC_EXPRESS_SERVER_URL` —
+ * override here when `EXPRESS_SERVER_URL` is set (e.g. Vercel → private backend).
  */
 function backendBaseUrl(): string {
   return (
@@ -36,43 +39,25 @@ function axiosErrorPayloadMessage(error: AxiosError<{ message?: string }>): stri
 }
 
 /**
- * Proxies GET `/files/pdf/:id` via the shared axios `api` (cookies + Bearer when forwarded).
- * Streams the PDF from the presigned storage URL same-origin on the frontend.
+ * Proxies GET `/files/pdf/:id` to Express using the incoming browser `Cookie` /
+ * duplicated Bearer (`authorization` + `x-pdf-stream-auth`), then streams S3 bytes.
  */
 export async function GET(request: NextRequest, context: { params: Promise<{ fileId: string }> }) {
   try {
-    console.log("===============")
     const { fileId } = await context.params;
 
-    const auth = request.headers.get("authorization");
+    const auth = authorizationForPdfStreamUpstream(request.headers);
     const cookie = request.headers.get("cookie");
-    console.log("auth", auth);
-    console.warn("auth", auth);
-    console.error("auth", auth);
-    console.info("auth", auth);
 
-    console.log("cookie", cookie);
-    console.warn("cookie", cookie);
-    console.error("cookie", cookie);
-    console.info("cookie", cookie);
-
-    const { data } = await api.get<unknown>(`/files/pdf/${encodeURIComponent(fileId)}`, {
+    const { data } = await upstreamClient.get<unknown>(`/files/pdf/${encodeURIComponent(fileId)}`, {
       baseURL: backendBaseUrl(),
       headers: {
         ...(cookie ? { Cookie: cookie } : {}),
         ...(auth ? { Authorization: auth } : {}),
       },
     });
-    console.log("data", data);
-    console.warn("data", data);
-    console.error("data", data);
-    console.info("data", data);
 
     const presignedUrl = readPresignedUrlFromJson(data);
-    console.log("presignedUrl", presignedUrl);
-    console.warn("presignedUrl", presignedUrl);
-    console.error("presignedUrl", presignedUrl);
-    console.info("presignedUrl", presignedUrl);
 
     const pdfRes = await fetch(presignedUrl, {
       redirect: "follow",
@@ -108,7 +93,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ fil
       headers: outHeaders,
     });
   } catch (error) {
-    console.log("error", error);
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status ?? 502;
+      const message = axiosErrorPayloadMessage(error);
+      return NextResponse.json({ message }, { status });
+    }
+
+    console.error("[pdf-stream]", error);
     return NextResponse.json({ message: "Error fetching PDF from storage" }, { status: 500 });
   }
 }

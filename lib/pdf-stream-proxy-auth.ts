@@ -1,0 +1,56 @@
+/**
+ * Vercel can drop or relocate `Authorization` on ingress (e.g. apex→www redirects, edge rules).
+ * Browsers retain custom headers reliably; duplicate the Bearer here and read fallbacks server-side.
+ * @see https://stackoverflow.com/questions/79763676/next-js-vercel-api-route-loses-authorization-header-in-production-works-in-dev
+ */
+
+export const PDF_STREAM_PROXY_AUTH_HEADER = "x-pdf-stream-auth";
+
+export type IncomingRequestHeaders = Pick<Headers, "get">;
+
+function parseAuthorizationFromVercelScHeaders(raw: string | null): string | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    const auth = obj.Authorization ?? obj.authorization;
+    if (typeof auth === "string") {
+      const s = auth.trim();
+      return s.length > 0 ? s : null;
+    }
+  } catch {
+    //
+  }
+  return null;
+}
+
+/** Bearer (+ optional duplicates) forwarded from Next Route Handler → Express presign route. */
+export function authorizationForPdfStreamUpstream(incoming: IncomingRequestHeaders): string | null {
+  const std = incoming.get("authorization")?.trim();
+  if (std) {
+    return std;
+  }
+  const dup = incoming.get(PDF_STREAM_PROXY_AUTH_HEADER)?.trim();
+  if (dup) {
+    return dup;
+  }
+  const forwarded = incoming.get("x-forwarded-authorization")?.trim();
+  if (forwarded) {
+    return forwarded;
+  }
+  return parseAuthorizationFromVercelScHeaders(incoming.get("x-vercel-sc-headers"));
+}
+
+/** Browser → `/api/files/…/pdf-stream`: send both headers so ingress cannot strip auth entirely. */
+export function pdfStreamProxyRequestHeaders(accessToken: string): HeadersInit {
+  const t = accessToken.trim();
+  if (!t) {
+    return {};
+  }
+  const bearer = t.toLowerCase().startsWith("bearer ") ? t : `Bearer ${t}`;
+  return {
+    Authorization: bearer,
+    [PDF_STREAM_PROXY_AUTH_HEADER]: bearer,
+  };
+}

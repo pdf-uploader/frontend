@@ -1,4 +1,5 @@
 import { authStore } from "@/lib/auth-store";
+import { pdfStreamProxyRequestHeaders } from "@/lib/pdf-stream-proxy-auth";
 
 /** Full buffered fetch for intentional downloads (loads entire file into RAM once). Prefer passing the `/api/files/…/pdf-stream` URL to pdf.js for viewing. */
 export async function fetchPdfBlobThroughAppProxy(fileId: string, signal?: AbortSignal): Promise<Blob> {
@@ -8,7 +9,7 @@ export async function fetchPdfBlobThroughAppProxy(fileId: string, signal?: Abort
     signal,
     credentials: "include",
     cache: "no-store",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: token ? pdfStreamProxyRequestHeaders(token) : {},
   });
 
   if (response.status === 401) {
