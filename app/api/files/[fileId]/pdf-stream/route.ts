@@ -1,6 +1,9 @@
 import axios, { AxiosError } from "axios";
 import { NextRequest, NextResponse } from "next/server";
-import { authorizationForPdfStreamUpstream } from "@/lib/pdf-stream-proxy-auth";
+import {
+  authorizationForPdfStreamUpstream,
+  pdfStreamUpstreamCookieHeader,
+} from "@/lib/pdf-stream-proxy-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +50,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ fil
     const { fileId } = await context.params;
 
     const auth = authorizationForPdfStreamUpstream(request.headers);
-    const cookie = request.headers.get("cookie");
+    const cookie = pdfStreamUpstreamCookieHeader(request.headers.get("cookie"), auth);
 
     const { data } = await upstreamClient.get<unknown>(`/files/pdf/${encodeURIComponent(fileId)}`, {
       baseURL: backendBaseUrl(),

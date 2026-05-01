@@ -54,3 +54,29 @@ export function pdfStreamProxyRequestHeaders(accessToken: string): HeadersInit {
     [PDF_STREAM_PROXY_AUTH_HEADER]: bearer,
   };
 }
+
+/**
+ * Express `auth.middleware` reads `req.cookies.accessToken`; the real cookie lives on the EC2
+ * domain, so it never reaches a Vercel `/api/...` Route Handler. Mirror the Bearer into a
+ * `Cookie: accessToken=...` header on the server-to-server hop so the existing middleware works
+ * unchanged. Inbound cookies (if any) are preserved.
+ */
+export function pdfStreamUpstreamCookieHeader(
+  incomingCookie: string | null | undefined,
+  authorization: string | null | undefined,
+): string | undefined {
+  const parts: string[] = [];
+  if (incomingCookie && incomingCookie.trim()) {
+    parts.push(incomingCookie.trim());
+  }
+  if (authorization) {
+    const token = authorization.replace(/^Bearer\s+/i, "").trim();
+    if (token) {
+      const joined = parts.join("; ");
+      if (!/(?:^|;\s*)accessToken=/i.test(joined)) {
+        parts.push(`accessToken=${token}`);
+      }
+    }
+  }
+  return parts.length > 0 ? parts.join("; ") : undefined;
+}
