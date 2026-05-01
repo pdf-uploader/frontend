@@ -121,12 +121,10 @@ export default function FileViewerPage() {
   }, [fileId]);
 
   /**
-   * Two-step PDF load:
-   *   1. Browser → EC2 (`/files/pdf/:id`) — direct call, mirrors `/folders` / `/files/:id` so auth
-   *      cookies + Bearer attach normally and Vercel's edge cannot replace `Authorization`.
-   *   2. Browser → `/api/pdf-bytes?url=<presigned>` — same-origin passthrough. We do not fetch
-   *      the S3 URL directly because S3 returns no `Access-Control-Allow-Origin` for cross-origin
-   *      `fetch()`, even though the URL is public when opened in a tab.
+   * One-shot PDF load: fetch the presigned URL from EC2, hand it to `PDFViewer`, which streams
+   * the bytes once into a Blob (with progress) and gives the Blob to `<Document>`. No proxy hop,
+   * no range requests, no per-render refetch (`<PDFViewer key={viewerPdfSrc}>` remounts only when
+   * the URL actually changes).
    */
   useEffect(() => {
     if (!fileId) {
@@ -139,7 +137,7 @@ export default function FileViewerPage() {
       try {
         const { url } = await getPdfViewerPresignedUrl(fileId, ctrl.signal);
         if (!cancelled) {
-          setViewerPdfSrc(`/api/pdf-bytes?url=${encodeURIComponent(url)}`);
+          setViewerPdfSrc(url);
         }
       } catch (e) {
         if (cancelled || ctrl.signal.aborted) {
