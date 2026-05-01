@@ -148,27 +148,79 @@ export function PdfViewerPageLoading(props: {
   );
 }
 
-/** Shown while react-pdf streams and parses pages after the source URL is ready. */
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) {
+    return "0 B";
+  }
+  const u = ["B", "KB", "MB", "GB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < u.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)} ${u[i]}`;
+}
+
+/**
+ * Single progress bar: network download (optional) then PDF.js parse, expressed as one 0–100 % when possible.
+ */
 export function PdfDocumentRenderLoading(props: {
-  loaded?: number;
-  total?: number;
+  /** Bytes read from the HTTP response while building the Blob. */
+  fetchLoaded?: number;
+  fetchTotal?: number | null;
+  /** PDF.js `onLoadProgress` while opening the document from the Blob. */
+  parseLoaded?: number;
+  parseTotal?: number;
+  /** After `fetchTotal` is known, treat download as this share of 100% (rest reserved for parse). */
+  fetchWeight?: number;
 }) {
-  const { loaded = 0, total } = props;
-  const denom = typeof total === "number" && total > 0 ? total : 0;
-  const percentKnown = denom > 0;
-  const percent = percentKnown ? Math.min(100, Math.max(0, Math.round((loaded / denom) * 100))) : null;
+  const {
+    fetchLoaded = 0,
+    fetchTotal = null,
+    parseLoaded = 0,
+    parseTotal = 0,
+    fetchWeight = 0.88,
+  } = props;
+
+  const w = Math.min(0.98, Math.max(0.5, fetchWeight));
+  const parseWeight = 1 - w;
+
+  const fetchHasTotal = typeof fetchTotal === "number" && fetchTotal > 0;
+  const parseHasTotal = parseTotal > 0;
+
+  let percent: number | null = null;
+  let detail = "";
+
+  if (fetchHasTotal) {
+    const fetchPct = Math.min(1, fetchLoaded / fetchTotal) * w * 100;
+    if (parseHasTotal) {
+      percent = Math.min(100, Math.round(fetchPct + (parseLoaded / parseTotal) * parseWeight * 100));
+      detail = "Downloading and opening the file…";
+    } else {
+      percent = Math.min(100, Math.round(fetchPct));
+      detail = "Downloading…";
+    }
+  } else if (parseHasTotal) {
+    percent = Math.min(100, Math.round((parseLoaded / parseTotal) * 100));
+    detail = "Opening document…";
+  } else if (fetchLoaded > 0) {
+    detail = `Downloading… ${formatBytes(fetchLoaded)} (size unknown until complete)`;
+  } else {
+    detail = "Preparing…";
+  }
+
+  const barWidth = percent !== null ? Math.min(100, Math.max(0, percent)) : 8;
 
   return (
     <div className="rounded-xl border border-slate-200/90 bg-gradient-to-b from-white to-slate-50/80 p-4 shadow-sm ring-1 ring-slate-900/5">
       <div className="mb-3 flex items-center gap-2">
         <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
-        <p className="text-xs font-semibold text-slate-800">Rendering PDF</p>
+        <p className="text-xs font-semibold text-slate-800">Loading PDF</p>
       </div>
-      <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
-        Parsing pages and preparing the viewer. Large files may take a moment.
-      </p>
+      <p className="mb-3 text-[11px] leading-relaxed text-slate-500">{detail}</p>
       <div className="mb-1.5 flex items-center justify-end text-[11px] font-medium tabular-nums text-slate-600">
-        <span aria-live="polite">{percentKnown ? `${percent}%` : "Loading…"}</span>
+        <span aria-live="polite">{percent !== null ? `${percent}%` : formatBytes(fetchLoaded)}</span>
       </div>
       <div
         className="relative h-2 w-full overflow-hidden rounded-full bg-slate-200/90"
@@ -176,31 +228,14 @@ export function PdfDocumentRenderLoading(props: {
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={percent ?? undefined}
-        aria-valuetext={percentKnown ? `${percent}%` : "Streaming PDF; total size unknown"}
+        aria-valuetext={percent !== null ? `${percent}%` : detail}
         aria-busy
       >
-        {percentKnown ? (
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-sky-500 via-blue-500 to-blue-600 shadow-sm transition-[width] duration-150 ease-out"
-            style={{ width: `${percent}%` }}
-          />
-        ) : (
-          <div className="pdf-render-shimmer h-full w-full rounded-full bg-gradient-to-r from-transparent via-blue-400/55 to-transparent" />
-        )}
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-sky-500 via-blue-500 to-blue-600 shadow-sm transition-[width] duration-150 ease-out"
+          style={{ width: `${barWidth}%` }}
+        />
       </div>
-      <style jsx>{`
-        @keyframes pdf-render-shimmer-move {
-          0% {
-            transform: translateX(-100%);
-          }
-          100% {
-            transform: translateX(100%);
-          }
-        }
-        :global(.pdf-render-shimmer) {
-          animation: pdf-render-shimmer-move 1.4s ease-in-out infinite;
-        }
-      `}</style>
     </div>
   );
 }

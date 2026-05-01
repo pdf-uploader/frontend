@@ -2,6 +2,7 @@
 
 import { PdfDocumentRenderLoading } from "@/components/pdf-loading-ui";
 import { useFixedChromeInverseScale } from "@/lib/hooks/use-fixed-chrome-inverse-scale";
+import { primePdfJsMainThreadOnly } from "@/lib/pdf-main-thread";
 import { getReaderPdfZoomChromePack } from "@/lib/reader-chat-room";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -9,11 +10,10 @@ import { Document, Page, pdfjs } from "react-pdf";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 /**
- * Same-origin worker (`/pdf.worker.min.mjs` copied from pdfjs-dist on `postinstall`) so PDF GETs stay
- * first-party and send `Credentials` + HttpOnly cookies to `/api/.../pdf-stream`. Cross-origin CDN
- * workers often omit cookies → EC2 sees no `accessToken`.
+ * Required by PDF.js if the fake-worker path ever falls back to a dynamic import.
+ * When `globalThis.pdfjsWorker` is set first, no dedicated worker thread is created.
  */
-pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 /** Fullscreen only: zoom as scale factors (100% = 1). +/- steps these; pinch clamps and snaps on release. */
 const FULLSCREEN_ZOOM_SCALES = [1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.4, 2.6, 2.8, 3] as const;
@@ -37,17 +37,15 @@ function fullscreenZoomPresetIndex(scale: number): number {
   return i >= 0 ? i : 0;
 }
 
-type PdfJsLoadOptions = {
-  /** Sent with each PDF.js GET (Bearer for API auth); cookies still sent same-origin via `withCredentials`. */
-  httpHeaders?: Record<string, string>;
-  withCredentials?: boolean;
-};
-
 interface PDFViewerProps {
-  /** Absolute same-origin `/api/files/…/pdf-stream` URL, or `Blob` if prefetched. Prefer URL so pdf.js streams without buffering a second full-file Blob. */
+  /**
+   * Same-origin PDF URL (cookies attach automatically). Fetched once with `fetch(..., { credentials: "include" })`
+   * and optional `Authorization` before passing bytes to `<Document>`; avoids PDF.js issuing an uncredentialled GET from a worker.
+   */
   fileUrl: string | Blob;
-  /** Optional Bearer for same-origin `/api/` PDF streams (omit if session is cookie-only). */
+  /** Sent on the prefetch `fetch`; HttpOnly cookies are still included when `credentials: "include"` and same-origin. */
   authorizationBearer?: string | null;
+  /** Forwarded as `credentials: "include"` on the prefetch `fetch` when true (default). */
   pdfWithCredentials?: boolean;
   activePage?: number;
   keyword?: string;
@@ -76,6 +74,44 @@ type BookmarkColorId = "silver" | "sand" | "ice" | "sage";
 type PageToneId = "white" | "ivory" | "mist";
 type CoverToneId = "slate" | "stone" | "forest";
 
+async function responseToBlobWithProgress(
+  res: Response,
+  signal: AbortSignal,
+  onChunk: (loaded: number, total: number | null) => void,
+): Promise<Blob> {
+  const ct = res.headers.get("content-type") ?? "application/pdf";
+  const cl = res.headers.get("content-length");
+  const parsedTotal = cl ? Number.parseInt(cl, 10) : NaN;
+  const totalKnown = Number.isFinite(parsedTotal) && parsedTotal > 0 ? parsedTotal : null;
+
+  if (!res.body) {
+    const blob = await res.blob();
+    onChunk(blob.size, totalKnown ?? blob.size ?? null);
+    return blob;
+  }
+
+  const reader = res.body.getReader();
+  const chunks: BlobPart[] = [];
+  let loaded = 0;
+  onChunk(0, totalKnown);
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (signal.aborted) {
+      await reader.cancel();
+      throw new DOMException("Aborted", "AbortError");
+    }
+    if (done) {
+      break;
+    }
+    chunks.push(value);
+    loaded += value.byteLength;
+    onChunk(loaded, totalKnown);
+  }
+
+  return new Blob(chunks, { type: ct });
+}
+
 export function PDFViewer({
   fileUrl,
   authorizationBearer = null,
@@ -97,27 +133,115 @@ export function PDFViewer({
   onDocumentLoadError,
   readerFabSizeRem,
 }: PDFViewerProps) {
-  const pdfDocumentOptions = useMemo((): PdfJsLoadOptions => {
-    const token = authorizationBearer?.trim();
-    const httpHeaders =
-      token && token.length > 0 ? ({ Authorization: `Bearer ${token}` } satisfies Record<string, string>) : undefined;
-    return {
-      ...(httpHeaders ? { httpHeaders } : {}),
-      withCredentials: pdfWithCredentials,
-    };
-  }, [authorizationBearer, pdfWithCredentials]);
+  const onDocumentLoadErrorRef = useRef(onDocumentLoadError);
+  onDocumentLoadErrorRef.current = onDocumentLoadError;
 
-  const [pdfLoadProgress, setPdfLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const [pdfMainReady, setPdfMainReady] = useState(false);
+  useEffect(() => {
+    void primePdfJsMainThreadOnly().then(() => setPdfMainReady(true));
+  }, []);
+
+  const [urlFetchedPdfBlob, setUrlFetchedPdfBlob] = useState<Blob | null>(null);
+  const [urlPdfFetchError, setUrlPdfFetchError] = useState<Error | null>(null);
+  const [pdfFetchProgress, setPdfFetchProgress] = useState<{ loaded: number; total: number | null }>({
+    loaded: 0,
+    total: null,
+  });
 
   useEffect(() => {
-    setPdfLoadProgress(null);
-  }, [authorizationBearer, fileUrl]);
+    if (typeof fileUrl !== "string") {
+      setUrlFetchedPdfBlob(null);
+      setUrlPdfFetchError(null);
+      setPdfFetchProgress({ loaded: 0, total: null });
+      return;
+    }
 
+    const trimmed = fileUrl.trim();
+    if (!trimmed) {
+      setUrlFetchedPdfBlob(null);
+      setUrlPdfFetchError(null);
+      setPdfFetchProgress({ loaded: 0, total: null });
+      return;
+    }
+
+    if (!pdfMainReady) {
+      return;
+    }
+
+    const ctrl = new AbortController();
+    setUrlFetchedPdfBlob(null);
+    setUrlPdfFetchError(null);
+    setPdfFetchProgress({ loaded: 0, total: null });
+
+    void (async () => {
+      try {
+        const token = authorizationBearer?.trim();
+        const headers = token ? ({ Authorization: `Bearer ${token}` } satisfies HeadersInit) : undefined;
+        const res = await fetch(trimmed, {
+          signal: ctrl.signal,
+          credentials: pdfWithCredentials ? "include" : "same-origin",
+          headers,
+        });
+        if (!res.ok) {
+          let message = `Could not load PDF (${res.status}).`;
+          const ct = res.headers.get("content-type");
+          if (ct?.includes("application/json")) {
+            try {
+              const j = (await res.json()) as { message?: unknown };
+              if (typeof j.message === "string" && j.message.trim()) {
+                message = j.message.trim();
+              }
+            } catch {
+              //
+            }
+          }
+          throw new Error(message);
+        }
+        const blob = await responseToBlobWithProgress(res, ctrl.signal, (loaded, total) => {
+          setPdfFetchProgress({ loaded, total });
+        });
+        setUrlFetchedPdfBlob(blob);
+      } catch (e) {
+        if (ctrl.signal.aborted) {
+          return;
+        }
+        const err = e instanceof Error ? e : new Error(String(e));
+        setUrlFetchedPdfBlob(null);
+        setUrlPdfFetchError(err);
+        onDocumentLoadErrorRef.current?.(err);
+      }
+    })();
+
+    return () => ctrl.abort();
+  }, [pdfMainReady, fileUrl, authorizationBearer, pdfWithCredentials]);
+
+  const documentPdfFile = useMemo((): Blob | undefined => {
+    if (typeof fileUrl !== "string") {
+      return fileUrl;
+    }
+    return urlFetchedPdfBlob ?? undefined;
+  }, [fileUrl, urlFetchedPdfBlob]);
+
+  const [parsePdfProgress, setParsePdfProgress] = useState<{ loaded: number; total: number }>({
+    loaded: 0,
+    total: 0,
+  });
+
+  useEffect(() => {
+    setParsePdfProgress({ loaded: 0, total: 0 });
+  }, [documentPdfFile]);
+
+  const isPdfFromBlobProp = typeof fileUrl !== "string";
   const documentLoadingUi = useMemo(
     () => (
-      <PdfDocumentRenderLoading loaded={pdfLoadProgress?.loaded} total={pdfLoadProgress?.total} />
+      <PdfDocumentRenderLoading
+        fetchLoaded={isPdfFromBlobProp ? 0 : pdfFetchProgress.loaded}
+        fetchTotal={isPdfFromBlobProp ? null : pdfFetchProgress.total}
+        parseLoaded={parsePdfProgress.loaded}
+        parseTotal={parsePdfProgress.total}
+      />
     ),
-    [pdfLoadProgress],
+    [isPdfFromBlobProp, pdfFetchProgress.loaded, pdfFetchProgress.total, parsePdfProgress.loaded, parsePdfProgress.total],
   );
 
   const MOBILE_BREAKPOINT = 1024;
@@ -658,16 +782,55 @@ export function PDFViewer({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [flipDirection, goToNextSpread, goToPrevSpread, isFullscreen]);
 
+  const fullscreenDocWrapClass =
+    isFullscreen
+      ? "flex h-full min-h-0 w-full max-w-full flex-1 flex-col"
+      : "w-full min-w-0 max-w-full space-y-4";
+
+  if (!pdfMainReady) {
+    return (
+      <div className={fullscreenDocWrapClass}>
+        <PdfDocumentRenderLoading />
+      </div>
+    );
+  }
+
+  if (typeof fileUrl === "string") {
+    const trimmedSrc = fileUrl.trim();
+    if (!trimmedSrc) {
+      return null;
+    }
+    if (urlPdfFetchError) {
+      return (
+        <div className={fullscreenDocWrapClass}>
+          <div className="rounded-xl border border-rose-200 bg-rose-50/90 px-4 py-5 text-center text-sm text-rose-900">
+            {urlPdfFetchError.message || "Unable to load the PDF."}
+          </div>
+        </div>
+      );
+    }
+    if (!urlFetchedPdfBlob) {
+      return (
+        <div className={fullscreenDocWrapClass}>
+          <PdfDocumentRenderLoading
+            fetchLoaded={pdfFetchProgress.loaded}
+            fetchTotal={pdfFetchProgress.total}
+            parseLoaded={0}
+            parseTotal={0}
+          />
+        </div>
+      );
+    }
+  }
+
   return (
     <Document
-      file={fileUrl}
-      options={pdfDocumentOptions}
+      file={documentPdfFile}
       onLoadProgress={({ loaded, total }) => {
-        if (typeof total === "number" && total > 0) {
-          setPdfLoadProgress({ loaded, total });
-        } else {
-          setPdfLoadProgress(null);
-        }
+        setParsePdfProgress((prev) => ({
+          loaded,
+          total: typeof total === "number" && total > 0 ? total : prev.total > 0 ? prev.total : 0,
+        }));
       }}
       onLoadSuccess={async (pdf: PDFDocumentProxy) => {
         const pages = pdf.numPages;
@@ -689,11 +852,7 @@ export function PDFViewer({
           : undefined
       }
       loading={documentLoadingUi}
-      className={
-        isFullscreen
-          ? "flex h-full min-h-0 w-full max-w-full flex-1 flex-col"
-          : "w-full min-w-0 max-w-full space-y-4"
-      }
+      className={fullscreenDocWrapClass}
     >
       <div
         ref={viewportRef}

@@ -20,9 +20,6 @@ package-lock.json
 .DS_Store
 *.pem
 
-# Generated from pdfjs-dist (scripts/copy-pdf-worker.mjs on postinstall)
-/public/pdf.worker.min.mjs
-
 # debug
 npm-debug.log*
 yarn-debug.log*
