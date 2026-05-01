@@ -5,13 +5,27 @@ import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import Link from "next/link";
 import { getBackendErrorMessage } from "@/lib/api-errors";
-import { checkEmailRegisteredForLogin, signIn } from "@/lib/api";
+import { checkEmailForLogin, signIn } from "@/lib/api";
 import { AuthBrandedShell, AuthPageFooterLinks } from "@/components/auth-branded-shell";
 import { SignInBlockedByAccountStatusError } from "@/lib/sign-in-errors";
 
 const AUTH_CHECK_EMAIL_DISABLED = process.env.NEXT_PUBLIC_AUTH_CHECK_EMAIL_DISABLED === "true";
 
 const LOGIN_CREDENTIALS_ERROR = "Incorrect email or password.";
+
+type EmailContinueAlert =
+  | null
+  | { message: string; detail?: string; showSignupLink: boolean };
+
+const EMAIL_NOT_REGISTERED_MESSAGE =
+  "This email is not registered. Please sign up to create an account.";
+
+const EMAIL_PENDING_APPROVAL_PRIMARY = "Awaiting admin approval.";
+const EMAIL_PENDING_APPROVAL_SECONDARY = "Sign in once your account is active.";
+
+function rejectedAccountMessage(): string {
+  return new SignInBlockedByAccountStatusError("REJECTED").message;
+}
 
 type AuthStep = "email" | "password";
 
@@ -21,10 +35,10 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isPasswordHidden, setIsPasswordHidden] = useState(true);
-  const [emailLookupError, setEmailLookupError] = useState("");
+  const [emailContinueAlert, setEmailContinueAlert] = useState<EmailContinueAlert>(null);
 
   const checkEmailMutation = useMutation({
-    mutationFn: (addr: string) => checkEmailRegisteredForLogin(addr),
+    mutationFn: (addr: string) => checkEmailForLogin(addr),
   });
 
   const loginMutation = useMutation({
@@ -38,7 +52,7 @@ export default function LoginPage() {
     if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
       return;
     }
-    setEmailLookupError("");
+    setEmailContinueAlert(null);
 
     if (AUTH_CHECK_EMAIL_DISABLED) {
       setEmail(trimmed);
@@ -47,15 +61,26 @@ export default function LoginPage() {
     }
 
     try {
-      const exists = await checkEmailMutation.mutateAsync(trimmed);
-      if (!exists) {
-        setEmailLookupError("There is no account for this email.");
+      const result = await checkEmailMutation.mutateAsync(trimmed);
+      if (!result.registered) {
+        setEmailContinueAlert({ message: EMAIL_NOT_REGISTERED_MESSAGE, showSignupLink: true });
+        return;
+      }
+      if (result.status !== "APPROVED") {
+        setEmailContinueAlert({
+          message: result.status === "REJECTED" ? rejectedAccountMessage() : EMAIL_PENDING_APPROVAL_PRIMARY,
+          detail: result.status === "REJECTED" ? undefined : EMAIL_PENDING_APPROVAL_SECONDARY,
+          showSignupLink: false,
+        });
         return;
       }
       setEmail(trimmed);
       setStep("password");
     } catch (error) {
-      setEmailLookupError(getBackendErrorMessage(error, "Could not verify this email. Try again."));
+      setEmailContinueAlert({
+        message: getBackendErrorMessage(error, "Could not verify this email. Try again."),
+        showSignupLink: false,
+      });
     }
   };
 
@@ -75,7 +100,7 @@ export default function LoginPage() {
                 onClick={() => {
                   setStep("email");
                   setPassword("");
-                  setEmailLookupError("");
+                  setEmailContinueAlert(null);
                   loginMutation.reset();
                 }}
                 className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 outline-none transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-sky-500/50"
@@ -122,7 +147,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(event) => {
                     setEmail(event.target.value);
-                    setEmailLookupError("");
+                    setEmailContinueAlert(null);
                   }}
                   placeholder="Email address"
                   className="auth-openai-input"
@@ -136,13 +161,21 @@ export default function LoginPage() {
                   {checkEmailMutation.isPending ? "Checking…" : "Continue"}
                 </button>
               </form>
-              {emailLookupError && (
-                <p className="mt-4 text-center text-sm text-rose-600" role="alert">
-                  {LOGIN_CREDENTIALS_ERROR}{" "}
-                  <Link href="/signup" className="font-medium text-sky-700 underline-offset-2 hover:underline">
-                    Create an account
-                  </Link>
-                </p>
+              {emailContinueAlert && (
+                <div className="mt-4 space-y-1.5 text-center text-sm text-rose-600" role="alert">
+                  <p>
+                    {emailContinueAlert.message}
+                    {emailContinueAlert.showSignupLink ? (
+                      <>
+                        {" "}
+                        <Link href="/signup" className="font-medium text-sky-700 underline-offset-2 hover:underline">
+                          Sign up
+                        </Link>
+                      </>
+                    ) : null}
+                  </p>
+                  {emailContinueAlert.detail ? <p>{emailContinueAlert.detail}</p> : null}
+                </div>
               )}
             </>
           )}

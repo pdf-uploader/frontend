@@ -1,6 +1,8 @@
 "use client";
 
 import { PdfDocumentRenderLoading } from "@/components/pdf-loading-ui";
+import { useFixedChromeInverseScale } from "@/lib/hooks/use-fixed-chrome-inverse-scale";
+import { getReaderPdfZoomChromePack } from "@/lib/reader-chat-room";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
@@ -30,8 +32,18 @@ function fullscreenZoomPresetIndex(scale: number): number {
   return i >= 0 ? i : 0;
 }
 
+type PdfJsLoadOptions = {
+  /** Sent with each PDF.js GET (Bearer for API auth); cookies still sent same-origin via `withCredentials`. */
+  httpHeaders?: Record<string, string>;
+  withCredentials?: boolean;
+};
+
 interface PDFViewerProps {
-  fileUrl: string;
+  /** Absolute same-origin `/api/files/…/pdf-stream` URL, or `Blob` if prefetched. Prefer URL so pdf.js streams without buffering a second full-file Blob. */
+  fileUrl: string | Blob;
+  /** Optional Bearer for same-origin `/api/` PDF streams (omit if session is cookie-only). */
+  authorizationBearer?: string | null;
+  pdfWithCredentials?: boolean;
   activePage?: number;
   keyword?: string;
   activeKeywordHitPage?: number;
@@ -47,6 +59,12 @@ interface PDFViewerProps {
   onNumPagesChange?: (total: number) => void;
   onVisiblePagesChange?: (pages: number[]) => void;
   bookmarkedPages?: number[];
+  /** Optional error callback (logging, telemetry). Remount `<Document>` by changing `fileUrl`/auth if you need recovery. */
+  onDocumentLoadError?: (error: Error) => void;
+  /**
+   * Reader FAB size in rem (fullscreen compact). When set with zoom UI, pill metrics match chat FAB proportionally.
+   */
+  readerFabSizeRem?: number;
 }
 
 type BookmarkColorId = "silver" | "sand" | "ice" | "sage";
@@ -55,6 +73,8 @@ type CoverToneId = "slate" | "stone" | "forest";
 
 export function PDFViewer({
   fileUrl,
+  authorizationBearer = null,
+  pdfWithCredentials = true,
   activePage = 1,
   keyword = "",
   activeKeywordHitPage,
@@ -69,7 +89,32 @@ export function PDFViewer({
   onNumPagesChange,
   onVisiblePagesChange,
   bookmarkedPages = [],
+  onDocumentLoadError,
+  readerFabSizeRem,
 }: PDFViewerProps) {
+  const pdfDocumentOptions = useMemo((): PdfJsLoadOptions => {
+    const token = authorizationBearer?.trim();
+    const httpHeaders =
+      token && token.length > 0 ? ({ Authorization: `Bearer ${token}` } satisfies Record<string, string>) : undefined;
+    return {
+      ...(httpHeaders ? { httpHeaders } : {}),
+      withCredentials: pdfWithCredentials,
+    };
+  }, [authorizationBearer, pdfWithCredentials]);
+
+  const [pdfLoadProgress, setPdfLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
+
+  useEffect(() => {
+    setPdfLoadProgress(null);
+  }, [authorizationBearer, fileUrl]);
+
+  const documentLoadingUi = useMemo(
+    () => (
+      <PdfDocumentRenderLoading loaded={pdfLoadProgress?.loaded} total={pdfLoadProgress?.total} />
+    ),
+    [pdfLoadProgress],
+  );
+
   const MOBILE_BREAKPOINT = 1024;
   const TOUCH_DESKTOP_BREAKPOINT = 1280;
   const BOOK_PAGE_MAX_WIDTH = 520;
@@ -390,6 +435,15 @@ export function PDFViewer({
   const showZoomUi = isFullscreen && !previewMode;
   const pinchZoomUpper = showZoomUi ? fullscreenZoomMax : MIN_ZOOM;
 
+  const pdfZoomChromePack = useMemo(
+    () =>
+      showZoomUi && readerFabSizeRem != null && readerFabSizeRem > 0
+        ? getReaderPdfZoomChromePack(readerFabSizeRem)
+        : null,
+    [readerFabSizeRem, showZoomUi]
+  );
+  const fixedChromeInverseScale = useFixedChromeInverseScale();
+
   const canZoomOut = showZoomUi && fullscreenZoomPresetIndex(pinchZoomScale) > 0;
   const canZoomIn = showZoomUi && fullscreenZoomPresetIndex(pinchZoomScale) < FULLSCREEN_ZOOM_SCALES.length - 1;
 
@@ -602,6 +656,14 @@ export function PDFViewer({
   return (
     <Document
       file={fileUrl}
+      options={pdfDocumentOptions}
+      onLoadProgress={({ loaded, total }) => {
+        if (typeof total === "number" && total > 0) {
+          setPdfLoadProgress({ loaded, total });
+        } else {
+          setPdfLoadProgress(null);
+        }
+      }}
       onLoadSuccess={async (pdf: PDFDocumentProxy) => {
         const pages = pdf.numPages;
         setNumPages(pages);
@@ -614,7 +676,14 @@ export function PDFViewer({
           setPdfPageViewportSize(null);
         }
       }}
-      loading={<PdfDocumentRenderLoading />}
+      onLoadError={
+        onDocumentLoadError
+          ? (err) => {
+              onDocumentLoadError(err instanceof Error ? err : new Error(String(err)));
+            }
+          : undefined
+      }
+      loading={documentLoadingUi}
       className={
         isFullscreen
           ? "flex h-full min-h-0 w-full max-w-full flex-1 flex-col"
@@ -784,9 +853,15 @@ export function PDFViewer({
         {showZoomUi && (
           <div
             data-pdf-zoom-controls
+            style={{
+              ...(pdfZoomChromePack?.bar ?? {}),
+              ...(fixedChromeInverseScale !== 1
+                ? { transform: `scale(${fixedChromeInverseScale})`, transformOrigin: "top right" }
+                : {}),
+            }}
             className={[
-              "z-50 flex items-center gap-3 rounded-full border px-3 py-2 shadow-sm backdrop-blur",
-              /* Inside overflow-auto while zoomed, absolute scrolls with content — fixed stays put. */
+              "z-50 flex items-center rounded-full border shadow-sm backdrop-blur",
+              pdfZoomChromePack ? "" : "gap-1.5 px-1.5 py-1",
               isFullscreen && pinchZoomScale > MIN_ZOOM
                 ? "fixed right-[max(0.75rem,env(safe-area-inset-right,0px))] top-[max(0.75rem,env(safe-area-inset-top,0px))] border-slate-300 bg-white/95 text-slate-800 shadow-sm"
                 : [
@@ -800,7 +875,10 @@ export function PDFViewer({
             <button
               type="button"
               onClick={resetZoom}
-              className="px-2 text-[22px] font-semibold leading-none transition hover:opacity-80"
+              style={pdfZoomChromePack?.emojiBtn}
+              className={["font-semibold leading-none transition hover:opacity-80", pdfZoomChromePack ? "" : "px-1 text-[11px]"]
+                .filter(Boolean)
+                .join(" ")}
               title="Reset zoom to 100%"
               aria-label="Reset zoom to 100 percent"
             >
@@ -810,10 +888,14 @@ export function PDFViewer({
               type="button"
               onClick={zoomOut}
               disabled={!canZoomOut}
+              style={pdfZoomChromePack?.circleBtn}
               className={[
-                "flex h-[56px] w-[56px] shrink-0 items-center justify-center rounded-full text-[28px] font-semibold leading-none transition",
+                "flex shrink-0 items-center justify-center rounded-full font-semibold leading-none transition",
                 "hover:bg-slate-100 disabled:text-slate-300",
-              ].join(" ")}
+                pdfZoomChromePack ? "" : "h-[28px] w-[28px] text-sm",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               title="Zoom out"
               aria-label="Zoom out"
             >
@@ -822,10 +904,13 @@ export function PDFViewer({
             <button
               type="button"
               onClick={resetZoom}
+              style={pdfZoomChromePack?.pctBtn}
               className={[
-                "min-w-[4.75rem] rounded-full px-5 py-2 text-[22px] font-semibold leading-none transition",
-                "hover:bg-slate-100",
-              ].join(" ")}
+                "rounded-full font-semibold leading-none transition hover:bg-slate-100",
+                pdfZoomChromePack ? "" : "min-w-[2.375rem] px-2.5 py-1 text-[11px]",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               title="Reset viewer zoom (combines toolbar zoom with visual viewport scale when the browser reports it)"
               aria-label={`Viewer zoom ${zoomHudPercent} percent; reset to fitted size`}
             >
@@ -835,10 +920,14 @@ export function PDFViewer({
               type="button"
               onClick={zoomIn}
               disabled={!canZoomIn}
+              style={pdfZoomChromePack?.circleBtn}
               className={[
-                "flex h-[56px] w-[56px] shrink-0 items-center justify-center rounded-full text-[28px] font-semibold leading-none transition",
+                "flex shrink-0 items-center justify-center rounded-full font-semibold leading-none transition",
                 "hover:bg-slate-100 disabled:text-slate-300",
-              ].join(" ")}
+                pdfZoomChromePack ? "" : "h-[28px] w-[28px] text-sm",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               title="Zoom in"
               aria-label="Zoom in"
             >

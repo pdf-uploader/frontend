@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -9,6 +9,9 @@ import axios from "axios";
 import { PdfViewerPageLoading } from "@/components/pdf-loading-ui";
 import { DocumentChatWidget } from "@/components/document-chat-widget";
 import { api, createBookmark, deleteBookmark, getBookmarks } from "@/lib/api";
+import { authStore } from "@/lib/auth-store";
+import { fetchPdfBlobThroughAppProxy } from "@/lib/fetch-pdf-via-proxy";
+import { READER_CHAT_ROOM } from "@/lib/reader-chat-room";
 import { FileDetails } from "@/lib/types";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -69,7 +72,6 @@ export default function FileViewerPage() {
   const [activeKeywordHitIndex, setActiveKeywordHitIndex] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [bookmarkedPages, setBookmarkedPages] = useState<number[]>([]);
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   const [isPseudoFullscreen, setIsPseudoFullscreen] = useState(false);
   const [bookmarkColor, setBookmarkColor] = useState<BookmarkColorId>("silver");
@@ -81,43 +83,43 @@ export default function FileViewerPage() {
   const [isTouchLikeInput, setIsTouchLikeInput] = useState(false);
   const [visiblePages, setVisiblePages] = useState<number[]>([]);
   const [bookmarkTargetPage, setBookmarkTargetPage] = useState<number | null>(null);
-  const [pdfDownloadProgress, setPdfDownloadProgress] = useState<{ loaded: number; total: number | null }>({
-    loaded: 0,
-    total: null,
-  });
+  const [viewerPdfSrc, setViewerPdfSrc] = useState("");
   const [fullscreenSearchDraft, setFullscreenSearchDraft] = useState("");
   const viewerSectionRef = useRef<HTMLElement | null>(null);
   const lastTapTimeRef = useRef(0);
   const hideFullscreenMenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFullscreen = isNativeFullscreen || isPseudoFullscreen;
 
+  const [fileFetchProgress, setFileFetchProgress] = useState<{ loaded: number; total: number | null } | null>(null);
+
   const fileQuery = useQuery({
     queryKey: ["file", fileId],
-    queryFn: async () => (await api.get<FileDetails>(`/files/${fileId}`)).data,
-    enabled: Boolean(fileId),
-  });
-
-  const pdfBlobQuery = useQuery({
-    queryKey: ["file-pdf", fileId],
     queryFn: async ({ signal }) => {
-      setPdfDownloadProgress({ loaded: 0, total: null });
-      const res = await api.get<Blob>(`/files/pdf/${fileId}`, {
-        responseType: "blob",
+      setFileFetchProgress({ loaded: 0, total: null });
+      const { data } = await api.get<FileDetails>(`/files/${fileId}`, {
         signal,
-        onDownloadProgress: (event) => {
-          if (signal.aborted) {
-            return;
-          }
-          const total = event.total && event.total > 0 ? event.total : null;
-          setPdfDownloadProgress({ loaded: event.loaded, total });
+        onDownloadProgress: (evt) => {
+          const total = evt.total && evt.total > 0 ? evt.total : null;
+          setFileFetchProgress({ loaded: evt.loaded, total });
         },
       });
-      const blob = res.data;
-      setPdfDownloadProgress({ loaded: blob.size, total: blob.size });
-      return blob;
+      setFileFetchProgress((prev) =>
+        prev?.total ? { loaded: prev.total, total: prev.total } : { loaded: 1, total: 1 },
+      );
+      return data;
     },
     enabled: Boolean(fileId),
   });
+
+  useEffect(() => {
+    setFileFetchProgress(null);
+  }, [fileId]);
+
+  useLayoutEffect(() => {
+    setViewerPdfSrc(`${window.location.origin}/api/files/${encodeURIComponent(fileId)}/pdf-stream`);
+  }, [fileId]);
+
+  const accessToken = useSyncExternalStore(authStore.subscribe, authStore.getAccessToken, () => null);
 
   const bookmarksQuery = useQuery({
     queryKey: ["bookmarks", fileId],
@@ -132,20 +134,6 @@ export default function FileViewerPage() {
   const deleteBookmarkMutation = useMutation({
     mutationFn: deleteBookmark,
   });
-
-  useEffect(() => {
-    if (!pdfBlobQuery.data) {
-      setBlobUrl(null);
-      return;
-    }
-
-    const url = URL.createObjectURL(pdfBlobQuery.data);
-    setBlobUrl(url);
-
-    return () => {
-      URL.revokeObjectURL(url);
-    };
-  }, [pdfBlobQuery.data]);
 
   useEffect(() => {
     setCurrentPage(initialPage);
@@ -273,7 +261,7 @@ export default function FileViewerPage() {
   }, []);
 
   const displayFilename = useMemo(
-    () => fileQuery.data?.filename || `file-${fileId}.pdf`,
+    () => fileQuery.data?.filename?.trim() || `file-${fileId}.pdf`,
     [fileQuery.data?.filename, fileId]
   );
   const returnToHref = useMemo(() => normalizeReturnToHref(returnToParam), [returnToParam]);
@@ -312,21 +300,25 @@ export default function FileViewerPage() {
     setActiveKeywordHitIndex(findNearestKeywordHitIndex(keywordHits, currentPage));
   }, [currentPage, keywordHits]);
 
-  if (fileQuery.isLoading || pdfBlobQuery.isLoading) {
+  const fileMetadataOverallPercent =
+    fileFetchProgress?.total != null && fileFetchProgress.total > 0
+      ? Math.min(100, Math.round((fileFetchProgress.loaded / fileFetchProgress.total) * 100))
+      : null;
+
+  if (fileQuery.isLoading) {
     return (
       <section className="mx-auto w-full max-w-2xl py-8">
         <PdfViewerPageLoading
-          fileMetadataLoaded={fileQuery.isSuccess}
-          pdfDownloading={pdfBlobQuery.isFetching}
-          filename={fileQuery.data?.filename}
-          progress={pdfDownloadProgress}
+          fileMetadataLoaded={false}
+          pdfBytesFetched={false}
+          overallPercent={fileMetadataOverallPercent}
         />
       </section>
     );
   }
 
-  if (fileQuery.error || pdfBlobQuery.error || !fileQuery.data || !pdfBlobQuery.data) {
-    const backendError = extractBackendError(fileQuery.error ?? pdfBlobQuery.error);
+  if (fileQuery.error || !fileQuery.data) {
+    const backendError = extractBackendError(fileQuery.error);
     return (
       <section className="mx-auto max-w-3xl rounded-3xl border border-rose-200 bg-gradient-to-br from-rose-50 via-white to-orange-50 p-7 shadow-sm">
         <p className="mb-2 inline-flex rounded-full border border-rose-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-rose-700">
@@ -352,15 +344,38 @@ export default function FileViewerPage() {
     );
   }
 
-  const onDownload = () => {
-    const downloadUrl = URL.createObjectURL(pdfBlobQuery.data);
-    const anchor = document.createElement("a");
-    anchor.href = downloadUrl;
-    anchor.download = displayFilename.endsWith(".pdf") ? displayFilename : `${displayFilename}.pdf`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(downloadUrl);
+  if (!viewerPdfSrc) {
+    return (
+      <section className="mx-auto w-full max-w-2xl py-8">
+        <PdfViewerPageLoading
+          fileMetadataLoaded
+          pdfBytesFetched={false}
+          overallPercent={fileMetadataOverallPercent ?? 99}
+          filename={fileQuery.data?.filename}
+        />
+      </section>
+    );
+  }
+
+  const onDownload = async () => {
+    const downloadLabel = displayFilename.endsWith(".pdf") ? displayFilename : `${displayFilename}.pdf`;
+
+    try {
+      const blob = await fetchPdfBlobThroughAppProxy(fileId);
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
+        anchor.download = downloadLabel;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch (error: unknown) {
+      window.alert(extractPdfBlobFetchError(error));
+    }
   };
 
   const toggleBookmark = (page: number) => {
@@ -494,18 +509,18 @@ export default function FileViewerPage() {
       >
         {isFullscreen ? (
           <>
-            <div className="peer absolute inset-x-0 top-0 z-20 h-24" />
+            <div className="peer absolute inset-x-0 top-0 z-20 h-12" />
             <div
               className={[
-                "absolute left-1/2 top-3 z-30 flex w-max -translate-x-1/2 -translate-y-[18px] flex-col items-center gap-3 transition-all duration-200 peer-hover:pointer-events-auto peer-hover:translate-y-0 peer-hover:opacity-100 hover:pointer-events-auto hover:translate-y-0 hover:opacity-100",
+                "absolute left-1/2 top-1.5 z-30 flex w-max -translate-x-1/2 -translate-y-[9px] flex-col items-center gap-1.5 transition-all duration-200 peer-hover:pointer-events-auto peer-hover:translate-y-0 peer-hover:opacity-100 hover:pointer-events-auto hover:translate-y-0 hover:opacity-100",
                 showFullscreenMenu
                   ? "pointer-events-auto translate-y-0 opacity-100"
                   : "pointer-events-none opacity-0",
               ].join(" ")}
             >
-              <div className="flex max-w-[min(96vw,36rem)] flex-col items-stretch gap-3 rounded-xl border border-slate-200 bg-white/95 p-[15px] shadow-sm backdrop-blur">
+              <div className="flex max-w-[min(96vw,36rem)] flex-col items-stretch gap-1.5 rounded-lg border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur">
                 <form
-                  className="flex min-w-0 flex-wrap items-center gap-[9px]"
+                  className="flex min-w-0 flex-wrap items-center gap-1"
                   onSubmit={(event) => {
                     event.preventDefault();
                     applyKeywordToUrl(fullscreenSearchDraft);
@@ -521,19 +536,19 @@ export default function FileViewerPage() {
                     value={fullscreenSearchDraft}
                     onChange={(event) => setFullscreenSearchDraft(event.target.value)}
                     placeholder="Search in PDF…"
-                    className="min-h-[51px] min-w-[min(100%,15rem)] flex-1 rounded-lg border border-slate-300 bg-white px-[15px] py-[9px] text-lg leading-snug text-slate-900 outline-none focus:border-slate-400 focus:ring-[3px] focus:ring-slate-200/80"
+                    className="min-h-[26px] min-w-[min(100%,7.5rem)] flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs leading-snug text-slate-900 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200/80"
                     autoComplete="off"
                   />
                   <button
                     type="submit"
-                    className="rounded-lg bg-slate-900 px-[18px] py-[9px] text-[17px] font-semibold text-white hover:bg-slate-800"
+                    className="rounded-md bg-slate-900 px-[9px] py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
                   >
                     Find
                   </button>
                   {keyword ? (
                     <button
                       type="button"
-                      className="rounded-lg border border-slate-300 bg-white px-[15px] py-[9px] text-[17px] font-medium text-slate-700 hover:bg-slate-50"
+                      className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
                       onClick={() => {
                         setFullscreenSearchDraft("");
                         applyKeywordToUrl("");
@@ -544,12 +559,12 @@ export default function FileViewerPage() {
                     </button>
                   ) : null}
                 </form>
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                  <span className="rounded-full bg-slate-900 px-[15px] py-[9px] text-[17px] font-semibold text-white">
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                  <span className="rounded-full bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white">
                     Page {currentPage} / {totalPages || "—"}
                   </span>
                   {keyword ? (
-                    <div className="flex items-center gap-[3px] rounded-lg border border-slate-300 bg-white p-[3px]">
+                    <div className="flex items-center gap-0.5 rounded-md border border-slate-300 bg-white p-0.5">
                       <button
                         type="button"
                         onClick={() => {
@@ -557,13 +572,13 @@ export default function FileViewerPage() {
                           revealFullscreenMenuTemporarily();
                         }}
                         disabled={!totalKeywordHits}
-                        className="rounded-md px-3 py-[9px] text-[17px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="rounded px-1.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
                         aria-label="Go to previous keyword match"
                         title="Previous keyword match"
                       >
                         ← Prev
                       </button>
-                      <span className="min-w-[6.75rem] text-center text-[17px] font-medium text-slate-600">
+                      <span className="min-w-[3.375rem] text-center text-[11px] font-medium text-slate-600">
                         {totalKeywordHits ? `${currentKeywordHit} / ${totalKeywordHits}` : "—"}
                       </span>
                       <button
@@ -573,7 +588,7 @@ export default function FileViewerPage() {
                           revealFullscreenMenuTemporarily();
                         }}
                         disabled={!totalKeywordHits}
-                        className="rounded-md px-3 py-[9px] text-[17px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="rounded px-1.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
                         aria-label="Go to next keyword match"
                         title="Next keyword match"
                       >
@@ -585,13 +600,13 @@ export default function FileViewerPage() {
                     <button
                       type="button"
                       onClick={onBookmarkPrimaryAction}
-                      className="rounded-md px-[15px] py-[9px] text-[17px] font-semibold transition"
+                      className="rounded-md px-2 py-1 text-[11px] font-semibold transition"
                       style={bookmarkButtonStyle}
                     >
                       {bookmarkButtonLabel}
                     </button>
                     {showBookmarkPagePicker && canChooseBookmarkPage && (
-                      <div className="absolute left-1/2 top-[calc(100%+12px)] z-40 flex max-w-[90vw] -translate-x-1/2 flex-wrap items-center justify-center gap-[6px] rounded-md border border-slate-200 bg-white p-[9px] shadow-xl">
+                      <div className="absolute left-1/2 top-[calc(100%+6px)] z-40 flex max-w-[90vw] -translate-x-1/2 flex-wrap items-center justify-center gap-[3px] rounded-md border border-slate-200 bg-white p-1 shadow-xl">
                         {visiblePages.map((pageNumber) => {
                           const selected = selectedBookmarkPage === pageNumber;
                           const alreadyBookmarked = bookmarkedPages.includes(pageNumber);
@@ -601,7 +616,7 @@ export default function FileViewerPage() {
                               type="button"
                               onClick={() => onChooseBookmarkPage(pageNumber)}
                               className={[
-                                "rounded px-3 py-[9px] text-[17px] font-medium transition",
+                                "rounded px-1.5 py-1 text-[11px] font-medium transition",
                                 selected ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100",
                               ].join(" ")}
                             >
@@ -615,7 +630,7 @@ export default function FileViewerPage() {
                   <button
                     type="button"
                     onClick={() => void toggleFullscreen()}
-                    className="rounded-md border border-slate-300 bg-white px-[15px] py-[9px] text-[17px] font-medium text-slate-800 shadow-sm hover:bg-slate-50"
+                    className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-800 shadow-sm hover:bg-slate-50"
                   >
                     Exit full screen
                   </button>
@@ -651,7 +666,8 @@ export default function FileViewerPage() {
                 Full screen
               </button>
               <button
-                onClick={onDownload}
+                type="button"
+                onClick={() => void onDownload()}
                 className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700"
               >
                 Download PDF
@@ -856,9 +872,10 @@ export default function FileViewerPage() {
               : "min-h-[58vh] sm:min-h-[70vh]",
           ].join(" ")}
         >
-          {blobUrl && (
-            <PDFViewer
-              fileUrl={blobUrl}
+          <PDFViewer
+              key={`${viewerPdfSrc}:${accessToken ?? ""}`}
+              fileUrl={viewerPdfSrc}
+              authorizationBearer={accessToken}
               activePage={currentPage}
               keyword={keyword}
               activeKeywordHitPage={activeKeywordTarget?.page}
@@ -868,22 +885,34 @@ export default function FileViewerPage() {
               coverTone={coverTone}
               isFullscreen={isFullscreen}
               previewMode={previewMode}
+              readerFabSizeRem={isFullscreen ? READER_CHAT_ROOM.fabSizeRem * 0.5 : undefined}
               onCurrentPageChange={setCurrentPage}
               onNumPagesChange={setTotalPages}
               onVisiblePagesChange={setVisiblePages}
               bookmarkedPages={bookmarkedPages}
             />
-          )}
         </div>
       </div>
-      {/* Reader chat size & fonts: `lib/reader-chat-room.ts` — READER_CHAT_ROOM, READER_CHAT_FONT */}
+      {/* Reader chat: `lib/reader-chat-room.ts` — geometry + `getReaderChatFonts` (halved when fullscreen). */}
       <DocumentChatWidget
         folderId={fileQuery.data.folderId}
         layout="reader"
         stackZClass={isFullscreen ? "z-[70]" : "z-40"}
+        readerFullscreenCompact={isFullscreen}
       />
     </section>
   );
+}
+
+function extractPdfBlobFetchError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (error instanceof TypeError && message.toLowerCase().includes("failed to fetch")) {
+    return "Could not reach the in-app PDF route. Confirm the Next.js server can call your backend (EXPRESS_SERVER_URL or NEXT_PUBLIC_EXPRESS_SERVER_URL) and try again.";
+  }
+  if (typeof message === "string" && message.trim()) {
+    return message.trim();
+  }
+  return "Unknown error loading the PDF.";
 }
 
 function extractBackendError(error: unknown): string {

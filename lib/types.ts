@@ -50,6 +50,14 @@ export interface FileDetails {
   fileUrl?: string;
 }
 
+/** GET `/files/pdf/:fileId` — presigned S3 URL for viewer and downloads. */
+export interface PdfPresignedUrlResponse {
+  url: string;
+  filename?: string;
+  /** Presigned URL lifetime in seconds from the backend (e.g. 300). */
+  expiresIn?: number;
+}
+
 export interface SearchResult {
   id: string; // unique result row id
   fileId: string;

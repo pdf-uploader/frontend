@@ -1,31 +1,22 @@
 "use client";
 
-import { formatBytes } from "@/lib/format-bytes";
-
-type DownloadProgress = { loaded: number; total: number | null };
-
 export function PdfViewerPageLoading(props: {
   fileMetadataLoaded: boolean;
-  pdfDownloading: boolean;
+  pdfBytesFetched: boolean;
+  /** When known, drives the primary bar width and a numeric label (0–100). Null = indeterminate. */
+  overallPercent: number | null;
   filename?: string;
-  progress: DownloadProgress;
 }) {
-  const { fileMetadataLoaded, pdfDownloading, filename, progress } = props;
-  const hasSizeHint = pdfDownloading && progress.loaded > 0;
-  const total = progress.total;
-  const percent =
-    total != null && total > 0 ? Math.min(100, Math.round((progress.loaded / total) * 100)) : null;
-  const indeterminatePdf = pdfDownloading && total == null;
+  const { fileMetadataLoaded, pdfBytesFetched, overallPercent, filename } = props;
 
-  const title = (() => {
-    if (!fileMetadataLoaded && !hasSizeHint) {
-      return "Opening document";
-    }
-    if (pdfDownloading) {
-      return "Downloading PDF";
-    }
-    return "Loading";
-  })();
+  const stillWorking = !fileMetadataLoaded || !pdfBytesFetched;
+  const barIndeterminate = stillWorking && overallPercent === null;
+
+  const detailLabel = !fileMetadataLoaded
+    ? "Fetching file info…"
+    : !pdfBytesFetched
+      ? "Loading PDF through the app…"
+      : " ";
 
   return (
     <section className="mx-auto w-full max-w-md px-3">
@@ -44,20 +35,20 @@ export function PdfViewerPageLoading(props: {
             </svg>
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold tracking-tight text-slate-900">{title}</p>
+            <p className="text-sm font-semibold tracking-tight text-slate-900">Opening document</p>
             {filename ? (
               <p className="mt-1 truncate text-xs text-slate-500" title={filename}>
                 {filename}
               </p>
             ) : (
-              <p className="mt-1 text-xs text-slate-500">&nbsp;</p>
+              <p className="mt-1 text-xs text-slate-500">{detailLabel.trim() ? detailLabel : "\u00a0"}</p>
             )}
           </div>
         </div>
 
         <dl className="mb-4 space-y-2 text-xs">
           <div className="flex items-center justify-between gap-2">
-            <dt className="font-medium text-slate-600">Details</dt>
+            <dt className="font-medium text-slate-600">File details</dt>
             <dd className="flex items-center gap-1.5 text-slate-700">
               {fileMetadataLoaded ? (
                 <>
@@ -78,66 +69,62 @@ export function PdfViewerPageLoading(props: {
             </dd>
           </div>
           <div className="flex items-center justify-between gap-2">
-            <dt className="font-medium text-slate-600">File data</dt>
-            <dd className="text-right text-slate-700">
-              {pdfDownloading ? (
-                percent != null ? (
-                  <span className="tabular-nums">{percent}%</span>
-                ) : hasSizeHint ? (
-                  <span className="tabular-nums text-slate-600">{formatBytes(progress.loaded)}</span>
-                ) : (
-                  <span className="text-slate-600">Starting…</span>
-                )
+            <dt className="font-medium text-slate-600">PDF stream</dt>
+            <dd className="flex items-center gap-1.5 text-slate-700">
+              {pdfBytesFetched ? (
+                <>
+                  <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-100 text-[10px] font-bold text-emerald-700">
+                    ✓
+                  </span>
+                  <span className="text-emerald-800">Ready</span>
+                </>
               ) : (
-                <span className="text-emerald-800">Ready</span>
+                <>
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-60" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
+                  </span>
+                  <span className="text-slate-600">Fetching…</span>
+                </>
               )}
             </dd>
           </div>
         </dl>
 
+        <div className="mb-2 flex items-center justify-between gap-3 text-[11px] text-slate-600">
+          <span className="font-medium tabular-nums text-slate-700">
+            {stillWorking ? (overallPercent !== null ? `${overallPercent}%` : "Loading…") : "100%"}
+          </span>
+        </div>
         <div
-          className={[
-            "relative h-2.5 w-full overflow-hidden rounded-full bg-slate-200/90",
-            indeterminatePdf ? "pdf-load-track-indeterminate" : "",
-          ].join(" ")}
+          className={["relative h-2.5 w-full overflow-hidden rounded-full bg-slate-200/90", barIndeterminate ? "pdf-load-track-indeterminate" : ""].join(
+            " ",
+          )}
           role="progressbar"
-          aria-valuenow={percent ?? undefined}
+          aria-busy={stillWorking}
+          aria-label="Loading PDF viewer"
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-label="Download progress"
+          aria-valuenow={
+            overallPercent !== null ? overallPercent : stillWorking ? undefined : 100
+          }
+          aria-valuetext={
+            overallPercent !== null ? `${overallPercent}%` : stillWorking ? "Loading progress unknown" : "100%"
+          }
         >
           <div
             className={[
-              "h-full rounded-full bg-gradient-to-r from-sky-500 via-blue-500 to-blue-600 shadow-sm transition-[width] duration-200 ease-out",
-              indeterminatePdf ? "pdf-load-bar-indeterminate w-[38%]" : "",
-            ].join(" ")}
-            style={
-              indeterminatePdf
-                ? undefined
-                : {
-                    width: `${percent != null ? percent : progress.loaded > 0 ? 6 : 2}%`,
-                  }
-            }
+              "h-full rounded-full bg-gradient-to-r from-sky-500 via-blue-500 to-blue-600 shadow-sm transition-[width] duration-150 ease-out",
+              barIndeterminate ? "pdf-load-bar-indeterminate w-[38%]" : overallPercent !== null ? "" : stillWorking ? "w-0" : "w-full",
+            ].filter(Boolean).join(" ")}
+            style={overallPercent !== null && stillWorking ? { width: `${Math.min(100, Math.max(0, overallPercent))}%` } : undefined}
           />
         </div>
 
         <p className="mt-3 text-center text-[11px] leading-relaxed text-slate-500">
-          {pdfDownloading && total != null && total > 0 ? (
-            <>
-              <span className="tabular-nums">{formatBytes(progress.loaded)}</span>
-              {" of "}
-              <span className="tabular-nums">{formatBytes(total)}</span>
-            </>
-          ) : pdfDownloading && hasSizeHint ? (
-            <>
-              Received <span className="tabular-nums font-medium text-slate-600">{formatBytes(progress.loaded)}</span>
-              {total == null ? " — total size unavailable, still receiving…" : ""}
-            </>
-          ) : pdfDownloading ? (
-            "Receiving the document from the server…"
-          ) : (
-            "\u00a0"
-          )}
+          {stillWorking
+            ? "The app loads storage on the server so the browser does not need direct access to S3."
+            : "\u00a0"}
         </p>
 
         <style jsx>{`
@@ -161,8 +148,16 @@ export function PdfViewerPageLoading(props: {
   );
 }
 
-/** Shown while react-pdf parses and lays out pages after the blob is ready. */
-export function PdfDocumentRenderLoading() {
+/** Shown while react-pdf streams and parses pages after the source URL is ready. */
+export function PdfDocumentRenderLoading(props: {
+  loaded?: number;
+  total?: number;
+}) {
+  const { loaded = 0, total } = props;
+  const denom = typeof total === "number" && total > 0 ? total : 0;
+  const percentKnown = denom > 0;
+  const percent = percentKnown ? Math.min(100, Math.max(0, Math.round((loaded / denom) * 100))) : null;
+
   return (
     <div className="rounded-xl border border-slate-200/90 bg-gradient-to-b from-white to-slate-50/80 p-4 shadow-sm ring-1 ring-slate-900/5">
       <div className="mb-3 flex items-center gap-2">
@@ -172,8 +167,26 @@ export function PdfDocumentRenderLoading() {
       <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
         Parsing pages and preparing the viewer. Large files may take a moment.
       </p>
-      <div className="relative h-2 w-full overflow-hidden rounded-full bg-slate-200/90">
-        <div className="pdf-render-shimmer h-full w-full rounded-full bg-gradient-to-r from-transparent via-blue-400/55 to-transparent" />
+      <div className="mb-1.5 flex items-center justify-end text-[11px] font-medium tabular-nums text-slate-600">
+        <span aria-live="polite">{percentKnown ? `${percent}%` : "Loading…"}</span>
+      </div>
+      <div
+        className="relative h-2 w-full overflow-hidden rounded-full bg-slate-200/90"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent ?? undefined}
+        aria-valuetext={percentKnown ? `${percent}%` : "Streaming PDF; total size unknown"}
+        aria-busy
+      >
+        {percentKnown ? (
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-sky-500 via-blue-500 to-blue-600 shadow-sm transition-[width] duration-150 ease-out"
+            style={{ width: `${percent}%` }}
+          />
+        ) : (
+          <div className="pdf-render-shimmer h-full w-full rounded-full bg-gradient-to-r from-transparent via-blue-400/55 to-transparent" />
+        )}
       </div>
       <style jsx>{`
         @keyframes pdf-render-shimmer-move {

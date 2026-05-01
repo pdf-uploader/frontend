@@ -5,9 +5,10 @@ import { SignInBlockedByAccountStatusError } from "@/lib/sign-in-errors";
 import {
   isLoginBlockedAccountStatus,
   parseAccountStatusFromAuthPayload,
+  parseUserStatus,
 } from "@/lib/user-status";
 import { authStore } from "@/lib/auth-store";
-import { BookmarkItem, SignInResponse, UserStatus } from "@/lib/types";
+import { BookmarkItem, PdfPresignedUrlResponse, SignInResponse, UserStatus } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_EXPRESS_SERVER_URL ?? "http://localhost:4000";
 const AUTH_SIGN_OUT_ENDPOINT = process.env.NEXT_PUBLIC_AUTH_SIGNOUT_ENDPOINT?.trim() ?? "";
@@ -18,7 +19,7 @@ export const AUTH_ROUTES = {
   signIn: "/auth/signin",
   signUp: "/auth/signup",
   refresh: "/auth/refresh",
-  /** POST `{ email }` → `{ exists?: boolean }` — optional; used before password step on login. */
+  /** POST `{ email }` → `{ message, status }` when registered (`checkEmailForLogin` accepts several `message` phrasings). */
   checkEmail: "/auth/check-email",
 } as const;
 
@@ -178,33 +179,86 @@ export async function signUp(email: string, password: string, username: string):
   await api.post(AUTH_ROUTES.signUp, { email, password, username: username.trim() });
 }
 
+export type CheckEmailLoginResult =
+  | { registered: false }
+  /** Account exists; gate password step on `status === "APPROVED"`. */
+  | { registered: true; status: UserStatus };
+
+function isAccountExistsMessage(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const tail = trimmed.includes(".") ? (trimmed.split(".").pop() ?? trimmed) : trimmed;
+  if (tail.trim().toUpperCase() === "ACCOUNT_EXISTS") {
+    return true;
+  }
+  const normalized = trimmed.toLowerCase();
+  return (
+    normalized.includes("account already exists") ||
+    normalized.includes("already have an account")
+  );
+}
+
+function parseCheckEmailLoginBody(data: unknown): CheckEmailLoginResult {
+  if (data == null || typeof data !== "object") {
+    throw new Error("Invalid check-email response");
+  }
+  const r = data as Record<string, unknown>;
+
+  if (r.exists === false || r.registered === false) {
+    return { registered: false };
+  }
+
+  const status = parseUserStatus(r.status ?? r.userStatus ?? r.accountStatus);
+  const accountExistsMessage = isAccountExistsMessage(r.message);
+
+  if (accountExistsMessage && status) {
+    return { registered: true, status };
+  }
+
+  if (typeof r.exists === "boolean" && r.exists) {
+    return { registered: true, status: status ?? "APPROVED" };
+  }
+  if (typeof r.registered === "boolean" && r.registered) {
+    return { registered: true, status: status ?? "APPROVED" };
+  }
+
+  throw new Error("Unrecognized check-email response shape");
+}
+
 /**
- * Whether an account exists for sign-in. Backend should implement POST `/auth/check-email`
- * with JSON body `{ email }` and respond `{ "exists": true | false }` (or `{ "registered": … }`).
- * HTTP **404** is treated as email not registered.
+ * POST `/auth/check-email` with `{ email }`.
+ *
+ * When the email is registered the backend responds with a message indicating the account exists
+ * (e.g. `message: "ACCOUNT_EXISTS"` or `'Account already exists.'`) plus `status` (`UserStatus`).
+ * prompt signup.
  *
  * Override path with `NEXT_PUBLIC_AUTH_CHECK_EMAIL_PATH`. Set `NEXT_PUBLIC_AUTH_CHECK_EMAIL_DISABLED=true`
- * in `.env` to skip the request (login will go straight to the password step — dev only).
+ * to skip the request (login goes straight to the password step — dev only).
  */
-export async function checkEmailRegisteredForLogin(email: string): Promise<boolean> {
+export async function checkEmailForLogin(email: string): Promise<CheckEmailLoginResult> {
   const path = process.env.NEXT_PUBLIC_AUTH_CHECK_EMAIL_PATH?.trim() ?? AUTH_ROUTES.checkEmail;
   try {
-    const { data } = await api.post<{ exists?: boolean; registered?: boolean }>(path, {
+    const { data } = await api.post(path, {
       email: email.trim().toLowerCase(),
     });
-    if (typeof data.exists === "boolean") {
-      return data.exists;
-    }
-    if (typeof data.registered === "boolean") {
-      return data.registered;
-    }
-    return true;
+    return parseCheckEmailLoginBody(data);
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 404) {
-      return false;
+      return { registered: false };
     }
     throw error;
   }
+}
+
+/** @deprecated Use `checkEmailForLogin`, which validates account status before the password step. */
+export async function checkEmailRegisteredForLogin(email: string): Promise<boolean> {
+  const r = await checkEmailForLogin(email);
+  return r.registered && r.status === "APPROVED";
 }
 
 export type ApplicantSignUpPayload = {
@@ -435,6 +489,30 @@ export async function refreshAccessToken(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function parsePdfPresignedUrlPayload(data: unknown): PdfPresignedUrlResponse {
+  if (data == null || typeof data !== "object") {
+    throw new Error("PDF presign response was not JSON");
+  }
+  const r = data as Record<string, unknown>;
+  const url = typeof r.url === "string" ? r.url.trim() : "";
+  if (!url) {
+    throw new Error('PDF presign response missing "url"');
+  }
+  const filename =
+    typeof r.filename === "string" && r.filename.trim().length > 0 ? r.filename.trim() : undefined;
+  let expiresIn: number | undefined;
+  if (typeof r.expiresIn === "number" && Number.isFinite(r.expiresIn) && r.expiresIn > 0) {
+    expiresIn = r.expiresIn;
+  }
+  return { url, ...(filename ? { filename } : {}), ...(expiresIn != null ? { expiresIn } : {}) };
+}
+
+/** GET `/files/pdf/:fileId` — JSON with S3 presigned `url`; no binary body. */
+export async function getPdfViewerPresignedUrl(fileId: string, signal?: AbortSignal): Promise<PdfPresignedUrlResponse> {
+  const { data } = await api.get<unknown>(`/files/pdf/${encodeURIComponent(fileId)}`, { signal });
+  return parsePdfPresignedUrlPayload(data);
 }
 
 export async function getBookmarks(fileId: string): Promise<BookmarkItem[]> {
