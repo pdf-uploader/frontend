@@ -209,6 +209,8 @@ export function PDFViewer({
           return;
         }
         const err = e instanceof Error ? e : new Error(String(e));
+        // Server Route Handlers log to Vercel/host stdout only; this surfaces the same failure in DevTools.
+        console.error("[pdf-stream] fetch failed", { url: trimmed, message: err.message });
         setUrlFetchedPdfBlob(null);
         setUrlPdfFetchError(err);
         onDocumentLoadErrorRef.current?.(err);

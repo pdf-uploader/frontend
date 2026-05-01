@@ -41,13 +41,13 @@ function axiosErrorPayloadMessage(error: AxiosError<{ message?: string }>): stri
  */
 export async function GET(request: NextRequest, context: { params: Promise<{ fileId: string }> }) {
   try {
-    console.log("===============")
+    console.error("===============")
     const { fileId } = await context.params;
 
     const auth = request.headers.get("authorization");
     const cookie = request.headers.get("cookie");
-    console.log("auth", auth);
-    console.log("cookie", cookie);
+    console.error("auth", auth);
+    console.error("cookie", cookie);
 
     const { data } = await api.get<unknown>(`/files/pdf/${encodeURIComponent(fileId)}`, {
       baseURL: backendBaseUrl(),
@@ -56,10 +56,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ fil
         ...(auth ? { Authorization: auth } : {}),
       },
     });
-    console.log("data", data);
+    console.error("data", data);
 
     const presignedUrl = readPresignedUrlFromJson(data);
-    console.log("presignedUrl", presignedUrl);
+    console.error("presignedUrl", presignedUrl);
 
     const pdfRes = await fetch(presignedUrl, {
       redirect: "follow",
@@ -95,7 +95,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ fil
       headers: outHeaders,
     });
   } catch (error) {
-    console.log("error", error);
+    console.error("error", error);
     return NextResponse.json({ message: "Error fetching PDF from storage" }, { status: 500 });
   }
 }

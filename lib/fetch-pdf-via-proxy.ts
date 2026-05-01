@@ -28,7 +28,9 @@ export async function fetchPdfBlobThroughAppProxy(fileId: string, signal?: Abort
         // ignore malformed JSON body
       }
     }
-    throw new Error(detail || `Could not load PDF (${response.status}).`);
+    const msg = detail || `Could not load PDF (${response.status}).`;
+    console.error("[pdf-stream] fetch failed", { path, status: response.status, message: msg });
+    throw new Error(msg);
   }
 
   const blob = await response.blob();
