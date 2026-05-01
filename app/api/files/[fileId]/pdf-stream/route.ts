@@ -1,4 +1,6 @@
+import axios, { AxiosError } from "axios";
 import { NextRequest, NextResponse } from "next/server";
+import { api } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +16,8 @@ function readPresignedUrlFromJson(data: unknown): string {
 }
 
 /**
- * Server-side API base (reachable from the Next.js server). Prefer EXPRESS_SERVER_URL in production
- * so it can differ from the public browser URL.
+ * Matches server reachability logic; `api` defaults use `NEXT_PUBLIC_EXPRESS_SERVER_URL` only —
+ * Override `baseURL` per request when `EXPRESS_SERVER_URL` is set (e.g. Vercel → private backend).
  */
 function backendBaseUrl(): string {
   return (
@@ -25,61 +27,40 @@ function backendBaseUrl(): string {
   );
 }
 
+function axiosErrorPayloadMessage(error: AxiosError<{ message?: string }>): string {
+  const data = error.response?.data;
+  if (data && typeof data === "object" && typeof data.message === "string" && data.message.trim()) {
+    return data.message.trim();
+  }
+  return error.message || "Upstream request failed.";
+}
+
 /**
- * Streams the PDF through this app’s origin so the browser never cross-origin fetches S3.
- * Postman → S3 works without CORS; browsers require CORS or a same-origin proxy like this route.
+ * Proxies GET `/files/pdf/:id` via the shared axios `api` (cookies + Bearer when forwarded).
+ * Streams the PDF from the presigned storage URL same-origin on the frontend.
  */
 export async function GET(request: NextRequest, context: { params: Promise<{ fileId: string }> }) {
   const { fileId } = await context.params;
 
-  const forward = new Headers();
   const auth = request.headers.get("authorization");
-  if (auth) {
-    forward.set("Authorization", auth);
-  }
   const cookie = request.headers.get("cookie");
-  if (cookie) {
-    forward.set("Cookie", cookie);
-  }
+  console.log("auth", auth);
+  console.log("cookie", cookie);
 
-  const presignRes = await fetch(`${backendBaseUrl()}/files/pdf/${encodeURIComponent(fileId)}`, {
-    headers: forward,
+  const { data } = await api.get<unknown>(`/files/pdf/${encodeURIComponent(fileId)}`, {
+    baseURL: backendBaseUrl(),
+    headers: {
+      ...(cookie ? { Cookie: cookie } : {}),
+      ...(auth ? { Authorization: auth } : {}),
+    },
   });
+  console.log("data", data);
 
-  if (!presignRes.ok) {
-    let message = `Could not authorize PDF access (${presignRes.status}).`;
-    try {
-      const errJson = (await presignRes.json()) as { message?: string };
-      if (typeof errJson.message === "string" && errJson.message.trim()) {
-        message = errJson.message.trim();
-      }
-    } catch {
-      // ignore
-    }
-    return NextResponse.json({ message }, { status: presignRes.status });
-  }
-
-  let presignedUrl: string;
-  try {
-    const json: unknown = await presignRes.json();
-    presignedUrl = readPresignedUrlFromJson(json);
-  } catch {
-    return NextResponse.json({ message: "Backend presign response was not valid JSON." }, { status: 502 });
-  }
-
-  const upstreamHeaders = new Headers();
-  const range = request.headers.get("range");
-  if (range) {
-    upstreamHeaders.set("Range", range);
-  }
-  const ifRange = request.headers.get("if-range");
-  if (ifRange) {
-    upstreamHeaders.set("If-Range", ifRange);
-  }
+  const presignedUrl = readPresignedUrlFromJson(data);
+  console.log("presignedUrl", presignedUrl);
 
   const pdfRes = await fetch(presignedUrl, {
     redirect: "follow",
-    headers: upstreamHeaders,
   });
 
   if (!pdfRes.ok) {
