@@ -177,12 +177,17 @@ export function PDFViewer({
     void (async () => {
       let loggedHttpFailure = false;
       try {
+        // When credentials are off (e.g. presigned S3 URL), do **not** auto-attach a Bearer from
+        // `authStore`: any custom request header turns the cross-origin GET into a CORS preflight
+        // that storage hosts reject, surfacing as a generic "Failed to fetch" in the browser.
         const token =
-          authorizationBearer?.trim() || authStore.getAccessToken()?.trim() || null;
+          authorizationBearer?.trim() ||
+          (pdfWithCredentials === false ? null : authStore.getAccessToken()?.trim()) ||
+          null;
         const headers = token ? ({ Authorization: `Bearer ${token}` } satisfies HeadersInit) : undefined;
         const res = await fetch(trimmed, {
           signal: ctrl.signal,
-          credentials: pdfWithCredentials ? "include" : "same-origin",
+          credentials: pdfWithCredentials ? "include" : "omit",
           cache: "no-store",
           headers,
         });
