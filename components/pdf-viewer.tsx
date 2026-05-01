@@ -4,7 +4,6 @@ import { PdfDocumentRenderLoading } from "@/components/pdf-loading-ui";
 import { useFixedChromeInverseScale } from "@/lib/hooks/use-fixed-chrome-inverse-scale";
 import { primePdfJsMainThreadOnly } from "@/lib/pdf-main-thread";
 import { authStore } from "@/lib/auth-store";
-import { pdfStreamProxyRequestHeaders } from "@/lib/pdf-stream-proxy-auth";
 import { getReaderPdfZoomChromePack } from "@/lib/reader-chat-room";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -180,7 +179,7 @@ export function PDFViewer({
       try {
         const token =
           authorizationBearer?.trim() || authStore.getAccessToken()?.trim() || null;
-        const headers = token ? pdfStreamProxyRequestHeaders(token) : undefined;
+        const headers = token ? ({ Authorization: `Bearer ${token}` } satisfies HeadersInit) : undefined;
         const res = await fetch(trimmed, {
           signal: ctrl.signal,
           credentials: pdfWithCredentials ? "include" : "same-origin",
@@ -200,9 +199,7 @@ export function PDFViewer({
               //
             }
           }
-          // Objects as 2nd arg collapse to "▶ Object" in DevTools; use strings so the line is readable at a glance.
-          console.error(`[pdf-stream] HTTP ${res.status}: ${message}`);
-          console.error(`[pdf-stream] URL: ${trimmed}`);
+          console.error(`[pdf-viewer] HTTP ${res.status}: ${message}`);
           loggedHttpFailure = true;
           throw new Error(message);
         }
@@ -216,8 +213,7 @@ export function PDFViewer({
         }
         const err = e instanceof Error ? e : new Error(String(e));
         if (!loggedHttpFailure) {
-          console.error(`[pdf-stream] ${err.message}`);
-          console.error(`[pdf-stream] URL: ${trimmed}`);
+          console.error(`[pdf-viewer] ${err.message}`);
         }
         setUrlFetchedPdfBlob(null);
         setUrlPdfFetchError(err);

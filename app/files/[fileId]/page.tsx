@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -8,8 +8,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { PdfViewerPageLoading } from "@/components/pdf-loading-ui";
 import { DocumentChatWidget } from "@/components/document-chat-widget";
-import { api, createBookmark, deleteBookmark, getBookmarks } from "@/lib/api";
-import { authStore } from "@/lib/auth-store";
+import {
+  api,
+  createBookmark,
+  deleteBookmark,
+  getBookmarks,
+  getPdfViewerPresignedUrl,
+} from "@/lib/api";
 import { fetchPdfBlobThroughAppProxy } from "@/lib/fetch-pdf-via-proxy";
 import { READER_CHAT_ROOM } from "@/lib/reader-chat-room";
 import { FileDetails } from "@/lib/types";
@@ -115,11 +120,41 @@ export default function FileViewerPage() {
     setFileFetchProgress(null);
   }, [fileId]);
 
-  useLayoutEffect(() => {
-    setViewerPdfSrc(`${window.location.origin}/api/files/${encodeURIComponent(fileId)}/pdf-stream`);
+  /**
+   * Browser → EC2 directly (mirrors `/folders`, `/files/:id`): `withCredentials` carries the EC2-domain
+   * auth cookies and the axios interceptor adds `Authorization`. Vercel never sees this traffic, so it
+   * cannot replace `Authorization` with its internal proxy JWT. The returned presigned S3 URL is fetched
+   * with no auth (SigV4 lives in the query string).
+   */
+  useEffect(() => {
+    if (!fileId) {
+      return;
+    }
+    const ctrl = new AbortController();
+    let cancelled = false;
+    setViewerPdfSrc("");
+    void (async () => {
+      try {
+        const { url } = await getPdfViewerPresignedUrl(fileId, ctrl.signal);
+        if (!cancelled) {
+          setViewerPdfSrc(url);
+        }
+      } catch (e) {
+        if (cancelled || ctrl.signal.aborted) {
+          return;
+        }
+        const err = e instanceof Error ? e : new Error(String(e));
+        if (axios.isCancel(e) || err.name === "AbortError" || err.name === "CanceledError") {
+          return;
+        }
+        console.error(`[pdf-viewer] presign failed: ${err.message}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
   }, [fileId]);
-
-  const accessToken = useSyncExternalStore(authStore.subscribe, authStore.getAccessToken, () => null);
 
   const bookmarksQuery = useQuery({
     queryKey: ["bookmarks", fileId],
@@ -873,9 +908,9 @@ export default function FileViewerPage() {
           ].join(" ")}
         >
           <PDFViewer
-              key={`${viewerPdfSrc}:${accessToken ?? ""}`}
+              key={viewerPdfSrc}
               fileUrl={viewerPdfSrc}
-              authorizationBearer={accessToken}
+              pdfWithCredentials={false}
               activePage={currentPage}
               keyword={keyword}
               activeKeywordHitPage={activeKeywordTarget?.page}

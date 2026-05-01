@@ -1,39 +1,19 @@
-import { authStore } from "@/lib/auth-store";
-import { pdfStreamProxyRequestHeaders } from "@/lib/pdf-stream-proxy-auth";
+import { getPdfViewerPresignedUrl } from "@/lib/api";
 
-/** Full buffered fetch for intentional downloads (loads entire file into RAM once). Prefer passing the `/api/files/…/pdf-stream` URL to pdf.js for viewing. */
+/**
+ * Full buffered PDF fetch for intentional downloads.
+ *
+ * Browser → EC2 to obtain the presigned S3 URL (cookies + Bearer attach via the shared `api`),
+ * then Browser → S3 to read the bytes. Avoids the Vercel `/api/.../pdf-stream` proxy hop —
+ * Vercel's edge replaces `Authorization` with its own internal JWT, which EC2 rejects.
+ */
 export async function fetchPdfBlobThroughAppProxy(fileId: string, signal?: AbortSignal): Promise<Blob> {
-  const token = authStore.getAccessToken();
-  const path = `/api/files/${encodeURIComponent(fileId)}/pdf-stream`;
-  const response = await fetch(path, {
-    signal,
-    credentials: "include",
-    cache: "no-store",
-    headers: token ? pdfStreamProxyRequestHeaders(token) : {},
-  });
+  const { url } = await getPdfViewerPresignedUrl(fileId, signal);
 
-  if (response.status === 401) {
-    console.error("[pdf-stream] HTTP 401: Session expired. Sign in again.");
-    console.error(`[pdf-stream] path: ${path}`);
-    throw new Error("Session expired. Sign in again.");
-  }
-
+  const response = await fetch(url, { signal, cache: "no-store" });
   if (!response.ok) {
-    let detail = "";
-    const ct = response.headers.get("content-type");
-    if (ct?.includes("application/json")) {
-      try {
-        const j = (await response.json()) as { message?: string };
-        if (typeof j.message === "string" && j.message.trim()) {
-          detail = j.message.trim();
-        }
-      } catch {
-        // ignore malformed JSON body
-      }
-    }
-    const msg = detail || `Could not load PDF (${response.status}).`;
-    console.error(`[pdf-stream] HTTP ${response.status}: ${msg}`);
-    console.error(`[pdf-stream] path: ${path}`);
+    const msg = `Storage returned ${response.status} when reading the PDF.`;
+    console.error(`[pdf-download] HTTP ${response.status}: ${msg}`);
     throw new Error(msg);
   }
 

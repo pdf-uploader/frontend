@@ -135,9 +135,9 @@ export const authStore = {
 };
 
 /**
- * Run before React’s first paint on the client so `getAccessToken()`, axios interceptors, and same-origin PDF
- * fetches (`/api/.../pdf-stream`) see Bearer from sessionStorage immediately. `hydrate()` in `AppProviders` alone
- * is too late—it runs after the first render (effects), which can emit unauthenticated pdf.js GETs → 401.
+ * Run before React’s first paint on the client so `getAccessToken()` and axios interceptors see Bearer from
+ * sessionStorage immediately. `hydrate()` in `AppProviders` alone is too late—it runs after the first render
+ * (effects), which can emit unauthenticated GETs → 401.
  */
 if (typeof window !== "undefined") {
   authStore.hydrate();
