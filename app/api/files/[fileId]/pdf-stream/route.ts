@@ -47,7 +47,14 @@ export async function GET(request: NextRequest, context: { params: Promise<{ fil
     const auth = request.headers.get("authorization");
     const cookie = request.headers.get("cookie");
     console.log("auth", auth);
+    console.warn("auth", auth);
+    console.error("auth", auth);
+    console.info("auth", auth);
+
     console.log("cookie", cookie);
+    console.warn("cookie", cookie);
+    console.error("cookie", cookie);
+    console.info("cookie", cookie);
 
     const { data } = await api.get<unknown>(`/files/pdf/${encodeURIComponent(fileId)}`, {
       baseURL: backendBaseUrl(),
@@ -57,9 +64,15 @@ export async function GET(request: NextRequest, context: { params: Promise<{ fil
       },
     });
     console.log("data", data);
+    console.warn("data", data);
+    console.error("data", data);
+    console.info("data", data);
 
     const presignedUrl = readPresignedUrlFromJson(data);
     console.log("presignedUrl", presignedUrl);
+    console.warn("presignedUrl", presignedUrl);
+    console.error("presignedUrl", presignedUrl);
+    console.info("presignedUrl", presignedUrl);
 
     const pdfRes = await fetch(presignedUrl, {
       redirect: "follow",
