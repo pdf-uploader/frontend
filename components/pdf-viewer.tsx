@@ -8,7 +8,12 @@ import { Document, Page, pdfjs } from "react-pdf";
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+/**
+ * Same-origin worker (`/pdf.worker.min.mjs` copied from pdfjs-dist on `postinstall`) so PDF GETs stay
+ * first-party and send `Credentials` + HttpOnly cookies to `/api/.../pdf-stream`. Cross-origin CDN
+ * workers often omit cookies → EC2 sees no `accessToken`.
+ */
+pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
 /** Fullscreen only: zoom as scale factors (100% = 1). +/- steps these; pinch clamps and snaps on release. */
 const FULLSCREEN_ZOOM_SCALES = [1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.4, 2.6, 2.8, 3] as const;
