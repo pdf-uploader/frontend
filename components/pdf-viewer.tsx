@@ -175,6 +175,7 @@ export function PDFViewer({
     setPdfFetchProgress({ loaded: 0, total: null });
 
     void (async () => {
+      let loggedHttpFailure = false;
       try {
         const token =
           authorizationBearer?.trim() || authStore.getAccessToken()?.trim() || null;
@@ -198,6 +199,10 @@ export function PDFViewer({
               //
             }
           }
+          // Objects as 2nd arg collapse to "▶ Object" in DevTools; use strings so the line is readable at a glance.
+          console.error(`[pdf-stream] HTTP ${res.status}: ${message}`);
+          console.error(`[pdf-stream] URL: ${trimmed}`);
+          loggedHttpFailure = true;
           throw new Error(message);
         }
         const blob = await responseToBlobWithProgress(res, ctrl.signal, (loaded, total) => {
@@ -209,8 +214,10 @@ export function PDFViewer({
           return;
         }
         const err = e instanceof Error ? e : new Error(String(e));
-        // Server Route Handlers log to Vercel/host stdout only; this surfaces the same failure in DevTools.
-        console.error("[pdf-stream] fetch failed", { url: trimmed, message: err.message });
+        if (!loggedHttpFailure) {
+          console.error(`[pdf-stream] ${err.message}`);
+          console.error(`[pdf-stream] URL: ${trimmed}`);
+        }
         setUrlFetchedPdfBlob(null);
         setUrlPdfFetchError(err);
         onDocumentLoadErrorRef.current?.(err);

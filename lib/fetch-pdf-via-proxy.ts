@@ -12,6 +12,8 @@ export async function fetchPdfBlobThroughAppProxy(fileId: string, signal?: Abort
   });
 
   if (response.status === 401) {
+    console.error("[pdf-stream] HTTP 401: Session expired. Sign in again.");
+    console.error(`[pdf-stream] path: ${path}`);
     throw new Error("Session expired. Sign in again.");
   }
 
@@ -29,7 +31,8 @@ export async function fetchPdfBlobThroughAppProxy(fileId: string, signal?: Abort
       }
     }
     const msg = detail || `Could not load PDF (${response.status}).`;
-    console.error("[pdf-stream] fetch failed", { path, status: response.status, message: msg });
+    console.error(`[pdf-stream] HTTP ${response.status}: ${msg}`);
+    console.error(`[pdf-stream] path: ${path}`);
     throw new Error(msg);
   }
 
