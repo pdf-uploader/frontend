@@ -1,4 +1,4 @@
-const CACHE_NAME = "interactive-pdf-cache-v2";
+const CACHE_NAME = "interactive-pdf-cache-v4";
 const APP_SHELL = ["/", "/mainfest.json", "/app-icon.png"];
 
 self.addEventListener("install", (event) => {
@@ -28,6 +28,11 @@ self.addEventListener("message", (event) => {
   }
 });
 
+/** Same-origin PDF presign / proxy route — never use offline cache behavior; cookies must attach. */
+function isPdfPresignApiPath(pathname) {
+  return /^\/api\/files\/[^/]+\/pdf-stream\/?$/.test(pathname);
+}
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") {
     return;
@@ -35,6 +40,21 @@ self.addEventListener("fetch", (event) => {
 
   const requestUrl = new URL(event.request.url);
   if (requestUrl.origin !== self.location.origin) {
+    return;
+  }
+
+  if (isPdfPresignApiPath(requestUrl.pathname)) {
+    event.respondWith(
+      fetch(event.request.url, {
+        method: "GET",
+        headers: event.request.headers,
+        credentials: "include",
+        cache: "no-store",
+        redirect: event.request.redirect,
+        referrer: event.request.referrer,
+        integrity: event.request.integrity,
+      })
+    );
     return;
   }
 

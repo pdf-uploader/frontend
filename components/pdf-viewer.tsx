@@ -3,6 +3,7 @@
 import { PdfDocumentRenderLoading } from "@/components/pdf-loading-ui";
 import { useFixedChromeInverseScale } from "@/lib/hooks/use-fixed-chrome-inverse-scale";
 import { primePdfJsMainThreadOnly } from "@/lib/pdf-main-thread";
+import { authStore } from "@/lib/auth-store";
 import { getReaderPdfZoomChromePack } from "@/lib/reader-chat-room";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -175,11 +176,13 @@ export function PDFViewer({
 
     void (async () => {
       try {
-        const token = authorizationBearer?.trim();
+        const token =
+          authorizationBearer?.trim() || authStore.getAccessToken()?.trim() || null;
         const headers = token ? ({ Authorization: `Bearer ${token}` } satisfies HeadersInit) : undefined;
         const res = await fetch(trimmed, {
           signal: ctrl.signal,
           credentials: pdfWithCredentials ? "include" : "same-origin",
+          cache: "no-store",
           headers,
         });
         if (!res.ok) {

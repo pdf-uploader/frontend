@@ -7,6 +7,7 @@ export async function fetchPdfBlobThroughAppProxy(fileId: string, signal?: Abort
   const response = await fetch(path, {
     signal,
     credentials: "include",
+    cache: "no-store",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
 
