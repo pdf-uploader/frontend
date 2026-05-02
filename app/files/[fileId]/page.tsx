@@ -15,7 +15,7 @@ import {
   getBookmarks,
   getPdfViewerPresignedUrl,
 } from "@/lib/api";
-import { fetchPdfBlobThroughAppProxy } from "@/lib/fetch-pdf-via-proxy";
+import { triggerDirectDownload } from "@/lib/pdf-download";
 import { READER_CHAT_ROOM } from "@/lib/reader-chat-room";
 import { FileDetails } from "@/lib/types";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -121,10 +121,10 @@ export default function FileViewerPage() {
   }, [fileId]);
 
   /**
-   * One-shot PDF load: fetch the presigned URL from EC2, hand it to `PDFViewer`, which streams
-   * the bytes once into a Blob (with progress) and gives the Blob to `<Document>`. No proxy hop,
-   * no range requests, no per-render refetch (`<PDFViewer key={viewerPdfSrc}>` remounts only when
-   * the URL actually changes).
+   * Resolve the presigned S3 URL from EC2 and hand the string straight to `PDFViewer`. PDF.js
+   * fetches the bytes itself (range requests included), so the bucket's CORS for this origin must
+   * allow `GET` plus the `Range` request header. `<PDFViewer key={viewerPdfSrc}>` remounts only
+   * when the URL actually changes, so re-renders here do not retrigger downloads.
    */
   useEffect(() => {
     if (!fileId) {
@@ -393,23 +393,10 @@ export default function FileViewerPage() {
   }
 
   const onDownload = async () => {
-    const downloadLabel = displayFilename.endsWith(".pdf") ? displayFilename : `${displayFilename}.pdf`;
-
     try {
-      const blob = await fetchPdfBlobThroughAppProxy(fileId);
-      const objectUrl = URL.createObjectURL(blob);
-      try {
-        const anchor = document.createElement("a");
-        anchor.href = objectUrl;
-        anchor.download = downloadLabel;
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-      } finally {
-        URL.revokeObjectURL(objectUrl);
-      }
+      await triggerDirectDownload(fileId, displayFilename);
     } catch (error: unknown) {
-      window.alert(extractPdfBlobFetchError(error));
+      window.alert(extractBackendError(error));
     }
   };
 
@@ -910,7 +897,6 @@ export default function FileViewerPage() {
           <PDFViewer
               key={viewerPdfSrc}
               fileUrl={viewerPdfSrc}
-              pdfWithCredentials={false}
               activePage={currentPage}
               keyword={keyword}
               activeKeywordHitPage={activeKeywordTarget?.page}
@@ -924,6 +910,13 @@ export default function FileViewerPage() {
               onCurrentPageChange={setCurrentPage}
               onNumPagesChange={setTotalPages}
               onVisiblePagesChange={setVisiblePages}
+              onDocumentLoadError={(err) => {
+                // Most common cause: S3 bucket CORS does not allow GET/Range from this origin
+                // for the presigned URL, or the URL has expired (presign TTL elapsed).
+                console.error(
+                  `[file-viewer] presigned PDF load failed for fileId=${fileId}: ${err.message}`,
+                );
+              }}
               bookmarkedPages={bookmarkedPages}
             />
         </div>
@@ -937,17 +930,6 @@ export default function FileViewerPage() {
       />
     </section>
   );
-}
-
-function extractPdfBlobFetchError(error: unknown): string {
-  const message = error instanceof Error ? error.message : "";
-  if (error instanceof TypeError && message.toLowerCase().includes("failed to fetch")) {
-    return "Could not reach the in-app PDF route. Confirm the Next.js server can call your backend (EXPRESS_SERVER_URL or NEXT_PUBLIC_EXPRESS_SERVER_URL) and try again.";
-  }
-  if (typeof message === "string" && message.trim()) {
-    return message.trim();
-  }
-  return "Unknown error loading the PDF.";
 }
 
 function extractBackendError(error: unknown): string {

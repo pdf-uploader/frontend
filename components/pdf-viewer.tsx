@@ -3,7 +3,6 @@
 import { PdfDocumentRenderLoading } from "@/components/pdf-loading-ui";
 import { useFixedChromeInverseScale } from "@/lib/hooks/use-fixed-chrome-inverse-scale";
 import { primePdfJsMainThreadOnly } from "@/lib/pdf-main-thread";
-import { authStore } from "@/lib/auth-store";
 import { getReaderPdfZoomChromePack } from "@/lib/reader-chat-room";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -40,14 +39,11 @@ function fullscreenZoomPresetIndex(scale: number): number {
 
 interface PDFViewerProps {
   /**
-   * Same-origin PDF URL (cookies attach automatically). Fetched once with `fetch(..., { credentials: "include" })`
-   * and optional `Authorization` before passing bytes to `<Document>`; avoids PDF.js issuing an uncredentialled GET from a worker.
+   * PDF source. Strings (presigned S3 URLs, etc.) are handed directly to react-pdf's `<Document>`;
+   * PDF.js fetches them itself (range requests included), so the deployed origin must be allowed by
+   * the bucket's CORS for `GET` + `Range`. Pass a `Blob` only when bytes already live in memory.
    */
   fileUrl: string | Blob;
-  /** Sent on the prefetch `fetch`; HttpOnly cookies are still included when `credentials: "include"` and same-origin. */
-  authorizationBearer?: string | null;
-  /** Forwarded as `credentials: "include"` on the prefetch `fetch` when true (default). */
-  pdfWithCredentials?: boolean;
   activePage?: number;
   keyword?: string;
   activeKeywordHitPage?: number;
@@ -75,48 +71,8 @@ type BookmarkColorId = "silver" | "sand" | "ice" | "sage";
 type PageToneId = "white" | "ivory" | "mist";
 type CoverToneId = "slate" | "stone" | "forest";
 
-async function responseToBlobWithProgress(
-  res: Response,
-  signal: AbortSignal,
-  onChunk: (loaded: number, total: number | null) => void,
-): Promise<Blob> {
-  const ct = res.headers.get("content-type") ?? "application/pdf";
-  const cl = res.headers.get("content-length");
-  const parsedTotal = cl ? Number.parseInt(cl, 10) : NaN;
-  const totalKnown = Number.isFinite(parsedTotal) && parsedTotal > 0 ? parsedTotal : null;
-
-  if (!res.body) {
-    const blob = await res.blob();
-    onChunk(blob.size, totalKnown ?? blob.size ?? null);
-    return blob;
-  }
-
-  const reader = res.body.getReader();
-  const chunks: BlobPart[] = [];
-  let loaded = 0;
-  onChunk(0, totalKnown);
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (signal.aborted) {
-      await reader.cancel();
-      throw new DOMException("Aborted", "AbortError");
-    }
-    if (done) {
-      break;
-    }
-    chunks.push(value);
-    loaded += value.byteLength;
-    onChunk(loaded, totalKnown);
-  }
-
-  return new Blob(chunks, { type: ct });
-}
-
 export function PDFViewer({
   fileUrl,
-  authorizationBearer = null,
-  pdfWithCredentials = true,
   activePage = 1,
   keyword = "",
   activeKeywordHitPage,
@@ -142,99 +98,24 @@ export function PDFViewer({
     void primePdfJsMainThreadOnly().then(() => setPdfMainReady(true));
   }, []);
 
-  const [urlFetchedPdfBlob, setUrlFetchedPdfBlob] = useState<Blob | null>(null);
-  const [urlPdfFetchError, setUrlPdfFetchError] = useState<Error | null>(null);
-  const [pdfFetchProgress, setPdfFetchProgress] = useState<{ loaded: number; total: number | null }>({
-    loaded: 0,
-    total: null,
-  });
+  /**
+   * Memoized so PDF.js doesn't re-open the document on unrelated parent re-renders. The
+   * presigned URL is a standard https URL — we never wrap it in `URL.createObjectURL`, so
+   * there is no object URL lifecycle (no `revokeObjectURL`) to manage.
+   */
+  const documentFile = useMemo<string | Blob | undefined>(() => {
+    if (typeof fileUrl === "string") {
+      const trimmed = fileUrl.trim();
+      return trimmed || undefined;
+    }
+    return fileUrl;
+  }, [fileUrl]);
+
+  const [pdfLoadError, setPdfLoadError] = useState<Error | null>(null);
 
   useEffect(() => {
-    if (typeof fileUrl !== "string") {
-      setUrlFetchedPdfBlob(null);
-      setUrlPdfFetchError(null);
-      setPdfFetchProgress({ loaded: 0, total: null });
-      return;
-    }
-
-    const trimmed = fileUrl.trim();
-    if (!trimmed) {
-      setUrlFetchedPdfBlob(null);
-      setUrlPdfFetchError(null);
-      setPdfFetchProgress({ loaded: 0, total: null });
-      return;
-    }
-
-    if (!pdfMainReady) {
-      return;
-    }
-
-    const ctrl = new AbortController();
-    setUrlFetchedPdfBlob(null);
-    setUrlPdfFetchError(null);
-    setPdfFetchProgress({ loaded: 0, total: null });
-
-    void (async () => {
-      let loggedHttpFailure = false;
-      try {
-        // When credentials are off (e.g. presigned S3 URL), do **not** auto-attach a Bearer from
-        // `authStore`: any custom request header turns the cross-origin GET into a CORS preflight
-        // that storage hosts reject, surfacing as a generic "Failed to fetch" in the browser.
-        const token =
-          authorizationBearer?.trim() ||
-          (pdfWithCredentials === false ? null : authStore.getAccessToken()?.trim()) ||
-          null;
-        const headers = token ? ({ Authorization: `Bearer ${token}` } satisfies HeadersInit) : undefined;
-        const res = await fetch(trimmed, {
-          signal: ctrl.signal,
-          credentials: pdfWithCredentials ? "include" : "omit",
-          cache: "no-store",
-          headers,
-        });
-        if (!res.ok) {
-          let message = `Could not load PDF (${res.status}).`;
-          const ct = res.headers.get("content-type");
-          if (ct?.includes("application/json")) {
-            try {
-              const j = (await res.json()) as { message?: unknown };
-              if (typeof j.message === "string" && j.message.trim()) {
-                message = j.message.trim();
-              }
-            } catch {
-              //
-            }
-          }
-          console.error(`[pdf-viewer] HTTP ${res.status}: ${message}`);
-          loggedHttpFailure = true;
-          throw new Error(message);
-        }
-        const blob = await responseToBlobWithProgress(res, ctrl.signal, (loaded, total) => {
-          setPdfFetchProgress({ loaded, total });
-        });
-        setUrlFetchedPdfBlob(blob);
-      } catch (e) {
-        if (ctrl.signal.aborted) {
-          return;
-        }
-        const err = e instanceof Error ? e : new Error(String(e));
-        if (!loggedHttpFailure) {
-          console.error(`[pdf-viewer] ${err.message}`);
-        }
-        setUrlFetchedPdfBlob(null);
-        setUrlPdfFetchError(err);
-        onDocumentLoadErrorRef.current?.(err);
-      }
-    })();
-
-    return () => ctrl.abort();
-  }, [pdfMainReady, fileUrl, authorizationBearer, pdfWithCredentials]);
-
-  const documentPdfFile = useMemo((): Blob | undefined => {
-    if (typeof fileUrl !== "string") {
-      return fileUrl;
-    }
-    return urlFetchedPdfBlob ?? undefined;
-  }, [fileUrl, urlFetchedPdfBlob]);
+    setPdfLoadError(null);
+  }, [documentFile]);
 
   const [parsePdfProgress, setParsePdfProgress] = useState<{ loaded: number; total: number }>({
     loaded: 0,
@@ -243,19 +124,16 @@ export function PDFViewer({
 
   useEffect(() => {
     setParsePdfProgress({ loaded: 0, total: 0 });
-  }, [documentPdfFile]);
+  }, [documentFile]);
 
-  const isPdfFromBlobProp = typeof fileUrl !== "string";
   const documentLoadingUi = useMemo(
     () => (
       <PdfDocumentRenderLoading
-        fetchLoaded={isPdfFromBlobProp ? 0 : pdfFetchProgress.loaded}
-        fetchTotal={isPdfFromBlobProp ? null : pdfFetchProgress.total}
         parseLoaded={parsePdfProgress.loaded}
         parseTotal={parsePdfProgress.total}
       />
     ),
-    [isPdfFromBlobProp, pdfFetchProgress.loaded, pdfFetchProgress.total, parsePdfProgress.loaded, parsePdfProgress.total],
+    [parsePdfProgress.loaded, parsePdfProgress.total],
   );
 
   const MOBILE_BREAKPOINT = 1024;
@@ -809,37 +687,23 @@ export function PDFViewer({
     );
   }
 
-  if (typeof fileUrl === "string") {
-    const trimmedSrc = fileUrl.trim();
-    if (!trimmedSrc) {
-      return null;
-    }
-    if (urlPdfFetchError) {
-      return (
-        <div className={fullscreenDocWrapClass}>
-          <div className="rounded-xl border border-rose-200 bg-rose-50/90 px-4 py-5 text-center text-sm text-rose-900">
-            {urlPdfFetchError.message || "Unable to load the PDF."}
-          </div>
+  if (!documentFile) {
+    return null;
+  }
+
+  if (pdfLoadError) {
+    return (
+      <div className={fullscreenDocWrapClass}>
+        <div className="rounded-xl border border-rose-200 bg-rose-50/90 px-4 py-5 text-center text-sm text-rose-900">
+          {pdfLoadError.message || "Unable to load the PDF."}
         </div>
-      );
-    }
-    if (!urlFetchedPdfBlob) {
-      return (
-        <div className={fullscreenDocWrapClass}>
-          <PdfDocumentRenderLoading
-            fetchLoaded={pdfFetchProgress.loaded}
-            fetchTotal={pdfFetchProgress.total}
-            parseLoaded={0}
-            parseTotal={0}
-          />
-        </div>
-      );
-    }
+      </div>
+    );
   }
 
   return (
     <Document
-      file={documentPdfFile}
+      file={documentFile}
       onLoadProgress={({ loaded, total }) => {
         setParsePdfProgress((prev) => ({
           loaded,
@@ -858,13 +722,13 @@ export function PDFViewer({
           setPdfPageViewportSize(null);
         }
       }}
-      onLoadError={
-        onDocumentLoadError
-          ? (err) => {
-              onDocumentLoadError(err instanceof Error ? err : new Error(String(err)));
-            }
-          : undefined
-      }
+      onLoadError={(err) => {
+        const normalized = err instanceof Error ? err : new Error(String(err));
+        // S3/CORS rejection of a presigned URL surfaces here, not in `<Document>`'s success path.
+        console.error(`[pdf-viewer] document load failed: ${normalized.message}`);
+        setPdfLoadError(normalized);
+        onDocumentLoadErrorRef.current?.(normalized);
+      }}
       loading={documentLoadingUi}
       className={fullscreenDocWrapClass}
     >
