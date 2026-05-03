@@ -99,6 +99,26 @@ export function PDFViewer({
   }, []);
 
   /**
+   * Last line of defence for `"Worker was terminated"` rejections that escape the
+   * per-component `onLoadError` / `onRenderError` filters (e.g. internal pdfjs tasks
+   * that aren't surfaced through react-pdf callbacks). When the worker is being
+   * torn down during a remount or route change we silently suppress the noise so it
+   * doesn't trigger Next.js's runtime-error overlay.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      if (isPdfWorkerTerminatedError(event.reason)) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => window.removeEventListener("unhandledrejection", onUnhandledRejection);
+  }, []);
+
+  /**
    * Memoized so PDF.js doesn't re-open the document on unrelated parent re-renders. The
    * presigned URL is a standard https URL — we never wrap it in `URL.createObjectURL`, so
    * there is no object URL lifecycle (no `revokeObjectURL`) to manage.
@@ -718,16 +738,29 @@ export function PDFViewer({
           const page = await pdf.getPage(1);
           const viewport = page.getViewport({ scale: 1 });
           setPdfPageViewportSize({ width: viewport.width, height: viewport.height });
-        } catch {
-          setPdfPageViewportSize(null);
+        } catch (err) {
+          if (!isPdfWorkerTerminatedError(err)) {
+            setPdfPageViewportSize(null);
+          }
         }
       }}
       onLoadError={(err) => {
         const normalized = err instanceof Error ? err : new Error(String(err));
+        if (isPdfWorkerTerminatedError(normalized)) {
+          // Worker termination during unmount/remount is expected; do not surface.
+          return;
+        }
         // S3/CORS rejection of a presigned URL surfaces here, not in `<Document>`'s success path.
         console.error(`[pdf-viewer] document load failed: ${normalized.message}`);
         setPdfLoadError(normalized);
         onDocumentLoadErrorRef.current?.(normalized);
+      }}
+      onSourceError={(err) => {
+        const normalized = err instanceof Error ? err : new Error(String(err));
+        if (isPdfWorkerTerminatedError(normalized)) {
+          return;
+        }
+        console.error(`[pdf-viewer] document source failed: ${normalized.message}`);
       }}
       loading={documentLoadingUi}
       className={fullscreenDocWrapClass}
@@ -1215,6 +1248,18 @@ function BookPage({
         scale={zoomScale}
         renderAnnotationLayer={false}
         renderTextLayer
+        onLoadError={(err) => {
+          if (isPdfWorkerTerminatedError(err)) {
+            return;
+          }
+          console.error(`[pdf-viewer] page ${pageToRender} load failed: ${err.message}`);
+        }}
+        onRenderError={(err) => {
+          if (isPdfWorkerTerminatedError(err)) {
+            return;
+          }
+          console.error(`[pdf-viewer] page ${pageToRender} render failed: ${err.message}`);
+        }}
         customTextRenderer={({ str }) => {
           if (!normalizedKeyword || !regex) {
             return str;
@@ -1528,4 +1573,27 @@ function isStandaloneDisplayMode(): boolean {
     "standalone" in navigator &&
     Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
   return browserStandalone || iosStandalone;
+}
+
+/**
+ * `pdfjs-dist` raises `"Worker was terminated"` (and friends) whenever a queued task is
+ * still in-flight while the underlying `LoopbackPort` / Worker is destroyed — typically
+ * during route navigation or the React StrictMode mount → unmount → mount cycle in dev.
+ * It is benign in our case (the document is being torn down) but, when unhandled, Next.js
+ * surfaces it as a red runtime-error overlay. This predicate is used by every PDF.js
+ * lifecycle handler to discard those errors silently.
+ */
+function isPdfWorkerTerminatedError(value: unknown): boolean {
+  const message =
+    value instanceof Error
+      ? value.message
+      : typeof value === "string"
+        ? value
+        : value && typeof value === "object" && "message" in value
+          ? String((value as { message?: unknown }).message ?? "")
+          : "";
+  if (!message) {
+    return false;
+  }
+  return /worker (was|is|has been) terminated/i.test(message);
 }

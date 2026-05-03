@@ -9,7 +9,6 @@ import axios from "axios";
 import { api } from "@/lib/api";
 import {
   READER_CHAT_ROOM,
-  DEFAULT_CHAT_FONT,
   getReaderChatFonts,
   getReaderChatRoomStyles,
 } from "@/lib/reader-chat-room";
@@ -34,6 +33,30 @@ interface ChatModelOption {
   label: string;
 }
 
+/**
+ * Chatbot endpoint URLs per chat context. Centralized so each surface (home library,
+ * folder page, PDF reader) routes its `/chatbot/chat` POSTs through a clearly-named
+ * variable; if any one needs to swap to a different backend route in the future,
+ * change it here without touching the widget body.
+ */
+const CHATBOT_REQUEST_URLS = {
+  /** Home library chat (no folder context). */
+  library: "/chatbot/chat",
+  /** Folder page chat (folder-scoped). */
+  folder: "/chatbot/chat",
+  /** PDF reader chat (file/folder-scoped). */
+  reader: "/chatbot/chat",
+} as const;
+
+type ChatRequestContext = keyof typeof CHATBOT_REQUEST_URLS;
+
+function resolveChatRequestContext(folderId: string, layout: "default" | "reader"): ChatRequestContext {
+  if (layout === "reader") {
+    return "reader";
+  }
+  return folderId ? "folder" : "library";
+}
+
 interface DocumentChatWidgetProps {
   /** Current folder for document-scoped chat; use "" on the home library. */
   folderId?: string;
@@ -41,8 +64,8 @@ interface DocumentChatWidgetProps {
   stackZClass?: string;
   /** Slightly larger panel + launcher (e.g. PDF book viewer). */
   layout?: "default" | "reader";
-  /** Reader layout only: halve FAB, panel, and fonts while PDF is fullscreen. */
-  readerFullscreenCompact?: boolean;
+  /** Reader layout only: render at full size when the PDF is fullscreen. Non-fullscreen reader uses the halved-down sizing. */
+  readerFullscreen?: boolean;
 }
 
 const CHAT_MODEL_OPTIONS: readonly ChatModelOption[] = [
@@ -61,7 +84,7 @@ export function DocumentChatWidget({
   folderId = "",
   stackZClass = "z-40",
   layout = "default",
-  readerFullscreenCompact = false,
+  readerFullscreen = false,
 }: DocumentChatWidgetProps) {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
@@ -79,6 +102,9 @@ export function DocumentChatWidget({
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const requestSequenceRef = useRef(0);
   const blockedRequestIdsRef = useRef<Set<number>>(new Set());
+  const chatRequestContext = resolveChatRequestContext(folderId, layout);
+  const chatRequestUrl = CHATBOT_REQUEST_URLS[chatRequestContext];
+
   const chatMutation = useMutation({
     mutationFn: async ({
       message,
@@ -92,7 +118,7 @@ export function DocumentChatWidget({
       const body = model
         ? { folderId, model, message }
         : { folderId, message };
-      const response = await api.post("/chatbot/chat", body);
+      const response = await api.post(chatRequestUrl, body);
       const resolved = resolveChatbotResponse(response.data);
       return { ...resolved, requestId };
     },
@@ -260,9 +286,17 @@ export function DocumentChatWidget({
   const modelPickerDisabled = chatMutation.isPending || Boolean(assistantTyping);
 
   const isReaderLayout = layout === "reader";
-  const readerCompact = isReaderLayout && readerFullscreenCompact;
-  const readerChatGeom = isReaderLayout ? getReaderChatRoomStyles({ fullscreenCompact: readerFullscreenCompact }) : null;
-  const chatFont = isReaderLayout ? getReaderChatFonts(readerFullscreenCompact) : DEFAULT_CHAT_FONT;
+  /**
+   * All chat surfaces (home library, folder page, PDF reader fullscreen + non-fullscreen)
+   * render at the same "book preview" size — i.e. the halved reader geometry. Anchoring
+   * to a single sizing keeps the AI circle and panel visually consistent everywhere.
+   *
+   * `readerCompact` is also forced on so the panel uses the compact CSS branches
+   * (smaller padding, gaps, header chrome) regardless of where the widget renders.
+   */
+  const readerCompact = true;
+  const chatGeometry = getReaderChatRoomStyles({ fullscreen: false });
+  const chatFont = getReaderChatFonts(false);
   const fixedChromeInverseScale = useFixedChromeInverseScale();
 
   return (
@@ -270,23 +304,20 @@ export function DocumentChatWidget({
             <button
               onClick={() => setIsChatOpen((previous) => !previous)}
               title={isChatOpen ? "Hide chatbot" : "Open chatbot"}
-              style={
-                isReaderLayout
+              style={{
+                ...chatGeometry.fab,
+                // Match book-preview FAB icon scale across every chat surface.
+                fontSize: `${READER_CHAT_ROOM.fabIconFontRem * 0.5}rem`,
+                ...(fixedChromeInverseScale !== 1
                   ? {
-                      ...readerChatGeom!.fab,
-                      fontSize: `${READER_CHAT_ROOM.fabIconFontRem * (readerFullscreenCompact ? 0.5 : 1)}rem`,
-                      ...(fixedChromeInverseScale !== 1
-                        ? {
-                            transform: `scale(${fixedChromeInverseScale})`,
-                            transformOrigin: "bottom right",
-                          }
-                        : {}),
+                      transform: `scale(${fixedChromeInverseScale})`,
+                      transformOrigin: "bottom right",
                     }
-                  : undefined
-              }
+                  : {}),
+              }}
               className={[
                 "fixed inline-flex items-center justify-center rounded-full bg-[#1677ff] text-white shadow-[0_12px_28px_rgba(22,119,255,0.45)] transition hover:bg-[#0f68e8]",
-                isReaderLayout ? "" : "bottom-5 right-5 h-14 w-14 text-sm font-bold tracking-wide hover:scale-105",
+                isReaderLayout ? "" : "font-bold tracking-wide hover:scale-105",
                 stackZClass,
               ]
                 .filter(Boolean)
@@ -298,7 +329,7 @@ export function DocumentChatWidget({
             {isChatOpen && (
               <div
                 style={{
-                  ...readerChatGeom!.panel,
+                  ...chatGeometry.panel,
                   ...(fixedChromeInverseScale !== 1
                     ? {
                         transform: `scale(${fixedChromeInverseScale})`,
@@ -309,7 +340,6 @@ export function DocumentChatWidget({
                 className={[
                   "fixed flex flex-col overflow-hidden border border-slate-200 bg-[#fafafc] shadow-[0_30px_80px_rgba(15,23,42,0.18)]",
                   readerCompact ? "rounded-3xl" : "rounded-[2rem]",
-                  isReaderLayout ? "" : "bottom-20 right-5 h-[34rem] w-[23rem]",
                   stackZClass,
                 ]
                   .filter(Boolean)

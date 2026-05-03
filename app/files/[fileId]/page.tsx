@@ -17,6 +17,7 @@ import {
 } from "@/lib/api";
 import { triggerDirectDownload } from "@/lib/pdf-download";
 import { READER_CHAT_ROOM } from "@/lib/reader-chat-room";
+import { useFixedChromeInverseScale } from "@/lib/hooks/use-fixed-chrome-inverse-scale";
 import { FileDetails } from "@/lib/types";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -96,6 +97,13 @@ export default function FileViewerPage() {
   const isFullscreen = isNativeFullscreen || isPseudoFullscreen;
 
   const [fileFetchProgress, setFileFetchProgress] = useState<{ loaded: number; total: number | null } | null>(null);
+
+  /**
+   * Multiplier applied as `transform: scale(...)` to the fullscreen overlay chrome
+   * (search popup, page badge, bookmark, exit-fullscreen) so the bar stays a stable
+   * on-screen size regardless of pinch-zoom or desktop Ctrl + / − browser zoom.
+   */
+  const fixedChromeInverseScale = useFixedChromeInverseScale();
 
   const fileQuery = useQuery({
     queryKey: ["file", fileId],
@@ -533,10 +541,14 @@ export default function FileViewerPage() {
           <>
             <div className="peer absolute inset-x-0 top-0 z-20 h-12" />
             <div
+              style={{
+                transform: `translateX(-50%) scale(${fixedChromeInverseScale})`,
+                transformOrigin: "top center",
+              }}
               className={[
-                "absolute left-1/2 top-1.5 z-30 flex w-max -translate-x-1/2 -translate-y-[9px] flex-col items-center gap-1.5 transition-all duration-200 peer-hover:pointer-events-auto peer-hover:translate-y-0 peer-hover:opacity-100 hover:pointer-events-auto hover:translate-y-0 hover:opacity-100",
+                "absolute left-1/2 top-1.5 z-30 flex w-max flex-col items-center gap-1.5 transition-opacity duration-200 peer-hover:pointer-events-auto peer-hover:opacity-100 hover:pointer-events-auto hover:opacity-100",
                 showFullscreenMenu
-                  ? "pointer-events-auto translate-y-0 opacity-100"
+                  ? "pointer-events-auto opacity-100"
                   : "pointer-events-none opacity-0",
               ].join(" ")}
             >
@@ -554,7 +566,7 @@ export default function FileViewerPage() {
                   </label>
                   <input
                     id="fullscreen-pdf-search"
-                    type="search"
+                    type="text"
                     value={fullscreenSearchDraft}
                     onChange={(event) => setFullscreenSearchDraft(event.target.value)}
                     placeholder="Search in PDF…"
@@ -921,12 +933,12 @@ export default function FileViewerPage() {
             />
         </div>
       </div>
-      {/* Reader chat: `lib/reader-chat-room.ts` — geometry + `getReaderChatFonts` (halved when fullscreen). */}
+      {/* Reader chat: `lib/reader-chat-room.ts` — fullscreen renders at full base size, non-fullscreen reader is halved. */}
       <DocumentChatWidget
         folderId={fileQuery.data.folderId}
         layout="reader"
         stackZClass={isFullscreen ? "z-[70]" : "z-40"}
-        readerFullscreenCompact={isFullscreen}
+        readerFullscreen={isFullscreen}
       />
     </section>
   );
