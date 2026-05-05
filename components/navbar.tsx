@@ -34,7 +34,7 @@ export function Navbar() {
   }
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-slate-200/80 bg-white">
+    <header className="sticky top-0 z-40 w-full border-b border-imme-line bg-imme-surface/95 shadow-imme-card backdrop-blur-md">
       <div className="mx-auto flex min-h-16 w-full items-center gap-1.5 py-2 pl-0 pr-0 sm:min-h-20 sm:gap-2 sm:py-2.5 sm:pl-1 sm:pr-1 min-[900px]:gap-3">
         <a
           href={MOWT_WEBSITE_URL}
