@@ -65,6 +65,39 @@ interface PDFViewerProps {
    * Reader FAB size in rem (fullscreen compact). When set with zoom UI, pill metrics match chat FAB proportionally.
    */
   readerFabSizeRem?: number;
+
+  /**
+   * Saved highlights to restore visually on top of the rendered text layer. Each highlight's `text`
+   * is matched as a substring inside the page's text fragments — exact textual reproduction of what
+   * the user selected. Pages with no entries render unmarked.
+   */
+  pageHighlights?: PdfPageHighlight[];
+  /** Default fill applied when an entry's `color` is missing/unknown. CSS color (hex / rgb / named). */
+  defaultHighlightColor?: string;
+  /**
+   * Fired when the user finishes a text selection inside the PDF text layer. Cleared when the
+   * selection collapses. Use this to drive a floating "highlight / add note" toolbar.
+   */
+  onPdfTextSelected?: (selection: PdfTextSelection | null) => void;
+}
+
+/** One stored highlight projected onto a specific PDF page for restoration. */
+export interface PdfPageHighlight {
+  id: string;
+  page: number;
+  text: string;
+  /** CSS color (hex/rgb/named). Resolved by the caller from the user's color preference. */
+  color: string;
+}
+
+/** Snapshot emitted to the parent when the user finishes a text selection within the viewer. */
+export interface PdfTextSelection {
+  /** PDF page number (1-based). */
+  page: number;
+  /** Verbatim selected text. */
+  text: string;
+  /** Viewport-relative bounding rect of the selection — anchor for floating toolbars. */
+  rect: { top: number; left: number; right: number; bottom: number; width: number; height: number };
 }
 
 type BookmarkColorId = "silver" | "sand" | "ice" | "sage";
@@ -89,9 +122,14 @@ export function PDFViewer({
   bookmarkedPages = [],
   onDocumentLoadError,
   readerFabSizeRem,
+  pageHighlights = [],
+  defaultHighlightColor = "#fde68a",
+  onPdfTextSelected,
 }: PDFViewerProps) {
   const onDocumentLoadErrorRef = useRef(onDocumentLoadError);
   onDocumentLoadErrorRef.current = onDocumentLoadError;
+  const onPdfTextSelectedRef = useRef(onPdfTextSelected);
+  onPdfTextSelectedRef.current = onPdfTextSelected;
 
   const [pdfMainReady, setPdfMainReady] = useState(false);
   useEffect(() => {
@@ -198,6 +236,25 @@ export function PDFViewer({
   const [isPanningViewport, setIsPanningViewport] = useState(false);
   const normalizedKeyword = highlightEnabled ? keyword.trim().toLowerCase() : "";
   const bookmarkedSet = useMemo(() => new Set(bookmarkedPages), [bookmarkedPages]);
+  /** Highlights grouped by PDF page once per render so each `<BookPage>` only sees the entries it cares about. */
+  const highlightsByPage = useMemo(() => {
+    const map = new Map<number, PdfPageHighlight[]>();
+    for (const item of pageHighlights) {
+      if (!Number.isFinite(item.page) || item.page < 1) {
+        continue;
+      }
+      if (!item.text || !item.text.trim()) {
+        continue;
+      }
+      const list = map.get(item.page);
+      if (list) {
+        list.push(item);
+      } else {
+        map.set(item.page, [item]);
+      }
+    }
+    return map;
+  }, [pageHighlights]);
   const FLIP_DURATION = 460;
   const zoomPercent = Math.round(pinchZoomScale * visualViewportScale * 100);
   const zoomHudPercent = isFullscreen
@@ -466,6 +523,88 @@ export function PDFViewer({
       if (flipTimerRef.current !== null) {
         window.clearTimeout(flipTimerRef.current);
       }
+    };
+  }, []);
+
+  /**
+   * Surface PDF text selections (mouse-up / touch-end) to the parent. We resolve which page the
+   * selection lives on by walking up the common ancestor to a `[data-pdf-page-number]` element so
+   * the toolbar can label the highlight with the correct page even on desktop spreads. The handler
+   * is debounced via rAF so that the browser has finished updating `Selection` before we read it.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const root = viewportRef.current;
+    if (!root) {
+      return;
+    }
+
+    let frameId: number | null = null;
+    const evaluateSelection = () => {
+      frameId = null;
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+        onPdfTextSelectedRef.current?.(null);
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      if (!root.contains(range.commonAncestorContainer)) {
+        return;
+      }
+      const ancestor =
+        range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+          ? (range.commonAncestorContainer as Element)
+          : range.commonAncestorContainer.parentElement;
+      const pageNode = ancestor?.closest<HTMLElement>("[data-pdf-page-number]") ?? null;
+      if (!pageNode) {
+        return;
+      }
+      const pageAttr = Number(pageNode.dataset.pdfPageNumber ?? "");
+      if (!Number.isFinite(pageAttr) || pageAttr < 1) {
+        return;
+      }
+      const text = sel.toString();
+      if (!text.trim()) {
+        onPdfTextSelectedRef.current?.(null);
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      onPdfTextSelectedRef.current?.({
+        page: pageAttr,
+        text,
+        rect: {
+          top: rect.top,
+          left: rect.left,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        },
+      });
+    };
+
+    const schedule = () => {
+      if (frameId !== null) {
+        return;
+      }
+      frameId = window.requestAnimationFrame(evaluateSelection);
+    };
+
+    const onSelectionChange = () => schedule();
+    const onPointerUp = () => schedule();
+    document.addEventListener("selectionchange", onSelectionChange);
+    root.addEventListener("mouseup", onPointerUp);
+    root.addEventListener("touchend", onPointerUp);
+
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+      document.removeEventListener("selectionchange", onSelectionChange);
+      root.removeEventListener("mouseup", onPointerUp);
+      root.removeEventListener("touchend", onPointerUp);
     };
   }, []);
 
@@ -781,8 +920,6 @@ export function PDFViewer({
             : "mx-auto h-auto max-w-[1120px] rounded-2xl border border-slate-200 p-3 shadow-inner lg:h-[760px] lg:p-4",
         ].join(" ")}
         style={{
-          WebkitUserSelect: "none",
-          WebkitTouchCallout: "none",
           touchAction: isSinglePageFullscreen ? "auto" : undefined,
           ...(!isFullscreen ? getCoverSurfaceStyle(coverTone) : {}),
         }}
@@ -1042,6 +1179,8 @@ export function PDFViewer({
             zoomScale={pinchZoomScale}
             onNavigatePrev={goToPrevSpread}
             onNavigateNext={goToNextSpread}
+            pageHighlights={highlightsByPage.get(leftPage) ?? EMPTY_HIGHLIGHT_LIST}
+            defaultHighlightColor={defaultHighlightColor}
           />
           {rightPage ? (
             <BookPage
@@ -1061,6 +1200,8 @@ export function PDFViewer({
               onNavigatePrev={goToPrevSpread}
               onNavigateNext={goToNextSpread}
               isRightPage
+              pageHighlights={highlightsByPage.get(rightPage) ?? EMPTY_HIGHLIGHT_LIST}
+              defaultHighlightColor={defaultHighlightColor}
             />
           ) : fullscreenSpreadCombinedZoom ? null : (
             <div className={["hidden lg:block", isFullscreen ? "min-h-0 bg-white" : "rounded-xl border border-dashed border-slate-300 bg-white/70"].join(" ")} />
@@ -1209,7 +1350,13 @@ interface BookPageProps {
   fullscreenSpreadStrip?: boolean;
   onNavigateNext: () => void;
   onNavigatePrev: () => void;
+  /** Persistent highlights (saved by the user) projected onto this single page. */
+  pageHighlights: PdfPageHighlight[];
+  defaultHighlightColor: string;
 }
+
+/** Stable empty array reference for memo-friendly props on pages without highlights. */
+const EMPTY_HIGHLIGHT_LIST: PdfPageHighlight[] = [];
 
 function BookPage({
   pageNumber,
@@ -1230,6 +1377,8 @@ function BookPage({
   fullscreenSpreadStrip = false,
   onNavigateNext,
   onNavigatePrev,
+  pageHighlights,
+  defaultHighlightColor,
 }: BookPageProps) {
   const pageSurface = getPageSurfaceStyle(pageTone);
   const isZoomed = zoomScale > 1;
@@ -1238,9 +1387,16 @@ function BookPage({
     let pageKeywordOccurrenceCounter = 0;
     const isActiveTargetPage = pageToRender === activeKeywordHitPage;
     const activeOccurrence = isActiveTargetPage ? activeKeywordHitOccurrenceInPage : undefined;
-    const regex = normalizedKeyword ? new RegExp(`(${escapeRegExp(normalizedKeyword)})`, "gi") : null;
+    const keywordRegex = normalizedKeyword
+      ? new RegExp(escapeRegExp(normalizedKeyword), "gi")
+      : null;
+    const matchingHighlights = pageHighlights.filter((entry) => entry.page === pageToRender);
 
     return (
+      <div
+        data-pdf-page-number={pageToRender}
+        className="pdf-selectable-page relative inline-flex"
+      >
       <Page
         pageNumber={pageToRender}
         width={pageHeight ? undefined : pageWidth}
@@ -1261,23 +1417,59 @@ function BookPage({
           console.error(`[pdf-viewer] page ${pageToRender} render failed: ${err.message}`);
         }}
         customTextRenderer={({ str }) => {
-          if (!normalizedKeyword || !regex) {
-            return str;
+          const candidates: TextLayerSpan[] = [];
+
+          if (keywordRegex) {
+            keywordRegex.lastIndex = 0;
+            let match: RegExpExecArray | null = keywordRegex.exec(str);
+            while (match) {
+              pageKeywordOccurrenceCounter += 1;
+              const isActiveMatch =
+                isActiveTargetPage && activeOccurrence === pageKeywordOccurrenceCounter;
+              candidates.push({
+                start: match.index,
+                end: match.index + match[0].length,
+                color: isActiveMatch ? "#bbf7d0" : "#fde68a",
+                priority: isActiveMatch ? 0 : 2,
+              });
+              if (match.index === keywordRegex.lastIndex) {
+                keywordRegex.lastIndex += 1;
+              }
+              match = keywordRegex.exec(str);
+            }
           }
 
-          const lower = str.toLowerCase();
-          if (!lower.includes(normalizedKeyword)) {
-            return str;
+          for (const entry of matchingHighlights) {
+            const needle = entry.text;
+            if (!needle) {
+              continue;
+            }
+            let from = 0;
+            const lowerHaystack = str.toLowerCase();
+            const lowerNeedle = needle.toLowerCase();
+            while (from <= lowerHaystack.length) {
+              const idx = lowerHaystack.indexOf(lowerNeedle, from);
+              if (idx === -1) {
+                break;
+              }
+              candidates.push({
+                start: idx,
+                end: idx + needle.length,
+                color: entry.color || defaultHighlightColor,
+                priority: 1,
+                tooltip: `Highlight (page ${entry.page})`,
+              });
+              from = idx + Math.max(1, needle.length);
+            }
           }
 
-          return str.replace(regex, (_match) => {
-            pageKeywordOccurrenceCounter += 1;
-            const isActiveMatch = isActiveTargetPage && activeOccurrence === pageKeywordOccurrenceCounter;
-            const highlightColor = isActiveMatch ? "#bbf7d0" : "#fde68a";
-            return `<mark style="background:${highlightColor};padding:0 2px;">${_match}</mark>`;
-          });
+          if (candidates.length === 0) {
+            return str;
+          }
+          return renderTextLayerHtml(str, candidates);
         }}
       />
+      </div>
     );
   };
 
@@ -1302,6 +1494,10 @@ function BookPage({
       style={!isFullscreen ? { backgroundColor: pageSurface.pageBodyColor } : undefined}
       onClick={(event) => {
         if (isFullscreen && isZoomed) {
+          return;
+        }
+        if (hasActiveTextSelection()) {
+          /** User is highlighting/copying text — don't hijack the click for page navigation. */
           return;
         }
         if (isMobileView) {
@@ -1573,6 +1769,82 @@ function isStandaloneDisplayMode(): boolean {
     "standalone" in navigator &&
     Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
   return browserStandalone || iosStandalone;
+}
+
+/** Internal: one styled span emitted by `customTextRenderer` (keyword match or saved highlight). */
+interface TextLayerSpan {
+  start: number;
+  end: number;
+  color: string;
+  /** Lower number wins on overlap (0 = highest, e.g. active keyword). */
+  priority: number;
+  tooltip?: string;
+}
+
+/**
+ * Build the `<mark>`-decorated HTML react-pdf injects into a single text-layer fragment.
+ * Spans are merged so visually overlapping highlights pick a single winner by `priority`,
+ * and all surrounding text is HTML-escaped to avoid breaking the layout when the PDF
+ * itself contains `<` / `&`.
+ */
+function renderTextLayerHtml(str: string, candidates: TextLayerSpan[]): string {
+  if (!candidates.length) {
+    return escapeHtmlText(str);
+  }
+  const ordered = candidates
+    .slice()
+    .sort((a, b) =>
+      a.priority - b.priority ||
+      b.end - b.start - (a.end - a.start) ||
+      a.start - b.start
+    );
+  const placed: TextLayerSpan[] = [];
+  for (const span of ordered) {
+    const overlaps = placed.some((p) => !(span.end <= p.start || span.start >= p.end));
+    if (!overlaps) {
+      placed.push(span);
+    }
+  }
+  placed.sort((a, b) => a.start - b.start);
+
+  let out = "";
+  let cursor = 0;
+  for (const span of placed) {
+    if (span.start > cursor) {
+      out += escapeHtmlText(str.slice(cursor, span.start));
+    }
+    const middle = escapeHtmlText(str.slice(span.start, span.end));
+    const titleAttr = span.tooltip ? ` title="${escapeHtmlAttr(span.tooltip)}"` : "";
+    out += `<mark style="background:${span.color};padding:0 2px;border-radius:2px;"${titleAttr}>${middle}</mark>`;
+    cursor = span.end;
+  }
+  if (cursor < str.length) {
+    out += escapeHtmlText(str.slice(cursor));
+  }
+  return out;
+}
+
+function escapeHtmlText(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeHtmlAttr(value: string): string {
+  return escapeHtmlText(value).replace(/"/g, "&quot;");
+}
+
+/** True when the user currently has any visible (non-collapsed) text selection. */
+function hasActiveTextSelection(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) {
+    return false;
+  }
+  return sel.toString().trim().length > 0;
 }
 
 /**

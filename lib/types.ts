@@ -97,3 +97,33 @@ export interface BookmarkItem {
   createdAt: string;
   updatedAt: string;
 }
+
+/** Backend `Highlight` row — text the user marked on a specific page of a file. */
+export interface HighlightItem {
+  id: string;
+  fileId: string;
+  page: number;
+  /** Selected text (verbatim). Used both for display in lists and for visual restoration on the page. */
+  text: string;
+  /**
+   * Palette key. Server stores it as a string so the catalog can grow without a migration;
+   * the frontend normalizes anything outside `HIGHLIGHT_COLOR_OPTIONS` back to "yellow".
+   */
+  color?: string | null;
+  /** Inclusive 0-based offset of the highlight start within the page's plain text (`Content.content`). */
+  startOffset?: number | null;
+  /** Exclusive end offset paired with `startOffset`. */
+  endOffset?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Backend `Note` row — free-form note attached to a specific page of a file. */
+export interface NoteItem {
+  id: string;
+  fileId: string;
+  page: number;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}

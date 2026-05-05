@@ -8,7 +8,14 @@ import {
   parseUserStatus,
 } from "@/lib/user-status";
 import { authStore } from "@/lib/auth-store";
-import { BookmarkItem, PdfPresignedUrlResponse, SignInResponse, UserStatus } from "@/lib/types";
+import {
+  BookmarkItem,
+  HighlightItem,
+  NoteItem,
+  PdfPresignedUrlResponse,
+  SignInResponse,
+  UserStatus,
+} from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_EXPRESS_SERVER_URL ?? "http://localhost:4000";
 const AUTH_SIGN_OUT_ENDPOINT = process.env.NEXT_PUBLIC_AUTH_SIGNOUT_ENDPOINT?.trim() ?? "";
@@ -529,4 +536,61 @@ export async function createBookmark(payload: {
 
 export async function deleteBookmark(payload: { fileId: string; page: number }): Promise<void> {
   await api.delete("/bookmarks", { data: payload });
+}
+
+/* ------------------------------------------------------------------ */
+/* Highlights                                                         */
+/* ------------------------------------------------------------------ */
+
+/** GET `/highlights?fileId=:fileId` — current user's highlights for the file, ordered by page asc, createdAt asc. */
+export async function getHighlights(fileId: string): Promise<HighlightItem[]> {
+  return (await api.get<HighlightItem[]>("/highlights", { params: { fileId } })).data;
+}
+
+export interface CreateHighlightPayload {
+  fileId: string;
+  page: number;
+  text: string;
+  color?: string;
+  /** Offsets within the page's plain text — backend stores as nullable Int. */
+  startOffset?: number | null;
+  endOffset?: number | null;
+}
+
+export async function createHighlight(payload: CreateHighlightPayload): Promise<HighlightItem> {
+  return (await api.post<HighlightItem>("/highlights", payload)).data;
+}
+
+export async function updateHighlightColor(highlightId: string, color: string): Promise<HighlightItem> {
+  return (await api.patch<HighlightItem>(`/highlights/${encodeURIComponent(highlightId)}`, { color })).data;
+}
+
+export async function deleteHighlight(highlightId: string): Promise<void> {
+  await api.delete(`/highlights/${encodeURIComponent(highlightId)}`);
+}
+
+/* ------------------------------------------------------------------ */
+/* Notes                                                              */
+/* ------------------------------------------------------------------ */
+
+export async function getNotes(fileId: string): Promise<NoteItem[]> {
+  return (await api.get<NoteItem[]>("/notes", { params: { fileId } })).data;
+}
+
+export interface CreateNotePayload {
+  fileId: string;
+  page: number;
+  body: string;
+}
+
+export async function createNote(payload: CreateNotePayload): Promise<NoteItem> {
+  return (await api.post<NoteItem>("/notes", payload)).data;
+}
+
+export async function updateNote(noteId: string, body: string): Promise<NoteItem> {
+  return (await api.patch<NoteItem>(`/notes/${encodeURIComponent(noteId)}`, { body })).data;
+}
+
+export async function deleteNote(noteId: string): Promise<void> {
+  await api.delete(`/notes/${encodeURIComponent(noteId)}`);
 }

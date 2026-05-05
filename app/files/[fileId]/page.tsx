@@ -4,21 +4,30 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { PdfViewerPageLoading } from "@/components/pdf-loading-ui";
 import { DocumentChatWidget } from "@/components/document-chat-widget";
 import {
   api,
   createBookmark,
+  createHighlight,
+  createNote,
   deleteBookmark,
+  deleteHighlight,
+  deleteNote,
   getBookmarks,
+  getHighlights,
+  getNotes,
   getPdfViewerPresignedUrl,
+  updateHighlightColor,
+  updateNote,
 } from "@/lib/api";
 import { triggerDirectDownload } from "@/lib/pdf-download";
 import { READER_CHAT_ROOM } from "@/lib/reader-chat-room";
 import { useFixedChromeInverseScale } from "@/lib/hooks/use-fixed-chrome-inverse-scale";
-import { FileDetails } from "@/lib/types";
+import { FileDetails, HighlightItem, NoteItem } from "@/lib/types";
+import type { PdfPageHighlight, PdfTextSelection } from "@/components/pdf-viewer";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 
@@ -37,7 +46,37 @@ const PDFViewer = dynamic(() => import("@/components/pdf-viewer").then((mod) => 
 type BookmarkColorId = "silver" | "sand" | "ice" | "sage";
 type PageToneId = "white" | "ivory" | "mist";
 type CoverToneId = "slate" | "stone" | "forest";
-type PopoverPanelId = "bookmark" | "settings" | null;
+type HighlightColorId = "yellow" | "green" | "blue" | "pink";
+type PopoverPanelId = "bookmark" | "highlights" | "notes" | "settings" | null;
+
+interface HighlightColorOption {
+  id: HighlightColorId;
+  label: string;
+  /** Visible CSS color used both in the picker swatch and on the rendered text-layer mark. */
+  swatch: string;
+}
+
+const HIGHLIGHT_COLOR_OPTIONS: HighlightColorOption[] = [
+  { id: "yellow", label: "Yellow", swatch: "#fde68a" },
+  { id: "green", label: "Mint", swatch: "#bbf7d0" },
+  { id: "blue", label: "Sky", swatch: "#bfdbfe" },
+  { id: "pink", label: "Pink", swatch: "#fbcfe8" },
+];
+
+function resolveHighlightColorId(value: string | null | undefined): HighlightColorId {
+  if (typeof value === "string") {
+    const found = HIGHLIGHT_COLOR_OPTIONS.find((option) => option.id === value);
+    if (found) {
+      return found.id;
+    }
+  }
+  return "yellow";
+}
+
+function getHighlightSwatch(id: HighlightColorId): string {
+  const found = HIGHLIGHT_COLOR_OPTIONS.find((option) => option.id === id);
+  return found?.swatch ?? "#fde68a";
+}
 
 const BOOKMARK_COLOR_OPTIONS: Array<{ id: BookmarkColorId; label: string; swatch: string }> = [
   { id: "silver", label: "Silver", swatch: "#dfe1e5" },
@@ -63,6 +102,7 @@ export default function FileViewerPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const fileId = params.fileId;
   const keyword = searchParams.get("keyword") ?? "";
   const page = Number(searchParams.get("page") ?? "1");
@@ -83,8 +123,12 @@ export default function FileViewerPage() {
   const [bookmarkColor, setBookmarkColor] = useState<BookmarkColorId>("silver");
   const [pageTone, setPageTone] = useState<PageToneId>("white");
   const [coverTone, setCoverTone] = useState<CoverToneId>("slate");
+  const [highlightColor, setHighlightColor] = useState<HighlightColorId>("yellow");
   const [hoveredPanel, setHoveredPanel] = useState<PopoverPanelId>(null);
   const [pinnedPanel, setPinnedPanel] = useState<PopoverPanelId>(null);
+  const [pdfTextSelection, setPdfTextSelection] = useState<PdfTextSelection | null>(null);
+  /** Open note composer (driven by the "Add note" button on the floating toolbar or the notes panel). */
+  const [composeNote, setComposeNote] = useState<{ page: number; preset: string } | null>(null);
   const [showFullscreenMenu, setShowFullscreenMenu] = useState(false);
   const [isTouchLikeInput, setIsTouchLikeInput] = useState(false);
   const [visiblePages, setVisiblePages] = useState<number[]>([]);
@@ -178,6 +222,61 @@ export default function FileViewerPage() {
     mutationFn: deleteBookmark,
   });
 
+  const highlightsQuery = useQuery({
+    queryKey: ["highlights", fileId],
+    queryFn: async () => getHighlights(fileId),
+    enabled: Boolean(fileId),
+  });
+
+  const createHighlightMutation = useMutation({
+    mutationFn: createHighlight,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["highlights", fileId] });
+    },
+  });
+
+  const updateHighlightColorMutation = useMutation({
+    mutationFn: async (input: { id: string; color: HighlightColorId }) =>
+      updateHighlightColor(input.id, input.color),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["highlights", fileId] });
+    },
+  });
+
+  const deleteHighlightMutation = useMutation({
+    mutationFn: async (id: string) => deleteHighlight(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["highlights", fileId] });
+    },
+  });
+
+  const notesQuery = useQuery({
+    queryKey: ["notes", fileId],
+    queryFn: async () => getNotes(fileId),
+    enabled: Boolean(fileId),
+  });
+
+  const createNoteMutation = useMutation({
+    mutationFn: createNote,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["notes", fileId] });
+    },
+  });
+
+  const updateNoteMutation = useMutation({
+    mutationFn: async (input: { id: string; body: string }) => updateNote(input.id, input.body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["notes", fileId] });
+    },
+  });
+
+  const deleteNoteMutation = useMutation({
+    mutationFn: async (id: string) => deleteNote(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["notes", fileId] });
+    },
+  });
+
   useEffect(() => {
     setCurrentPage(initialPage);
   }, [initialPage]);
@@ -231,6 +330,19 @@ export default function FileViewerPage() {
   useEffect(() => {
     window.localStorage.setItem(getCoverToneStorageKey(fileId), coverTone);
   }, [coverTone, fileId]);
+
+  useEffect(() => {
+    const storedHighlightColor = window.localStorage.getItem(getHighlightColorStorageKey(fileId));
+    if (!storedHighlightColor || !isHighlightColorId(storedHighlightColor)) {
+      setHighlightColor("yellow");
+      return;
+    }
+    setHighlightColor(storedHighlightColor);
+  }, [fileId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(getHighlightColorStorageKey(fileId), highlightColor);
+  }, [fileId, highlightColor]);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -306,6 +418,20 @@ export default function FileViewerPage() {
   const displayFilename = useMemo(
     () => fileQuery.data?.filename?.trim() || `file-${fileId}.pdf`,
     [fileQuery.data?.filename, fileId]
+  );
+
+  const highlights = useMemo<HighlightItem[]>(() => highlightsQuery.data ?? [], [highlightsQuery.data]);
+  const notes = useMemo<NoteItem[]>(() => notesQuery.data ?? [], [notesQuery.data]);
+  /** Project highlights into the viewer's lightweight `PdfPageHighlight` shape (resolves color id → CSS swatch). */
+  const projectedPageHighlights = useMemo<PdfPageHighlight[]>(
+    () =>
+      highlights.map((entry) => ({
+        id: entry.id,
+        page: entry.page,
+        text: entry.text,
+        color: getHighlightSwatch(resolveHighlightColorId(entry.color)),
+      })),
+    [highlights]
   );
   const returnToHref = useMemo(() => normalizeReturnToHref(returnToParam), [returnToParam]);
   const keywordHits = useMemo(
@@ -417,6 +543,55 @@ export default function FileViewerPage() {
       createBookmarkMutation.mutate({ fileId, page, color: bookmarkColor });
       return [...prev, page].sort((a, b) => a - b);
     });
+  };
+
+  /**
+   * Save the current PDF text selection as a highlight, then clear the browser selection so the
+   * floating toolbar dismisses. Color is the user's currently-selected swatch (`highlightColor`),
+   * persisted per-file in localStorage. Offsets fall back to `null` until we wire the precise
+   * page-text positions through PDF.js getTextContent in a follow-up.
+   */
+  const saveHighlightFromSelection = (selection: PdfTextSelection) => {
+    const trimmed = selection.text.trim();
+    if (!trimmed) {
+      return;
+    }
+    createHighlightMutation.mutate({
+      fileId,
+      page: selection.page,
+      text: trimmed,
+      color: highlightColor,
+      startOffset: null,
+      endOffset: null,
+    });
+    if (typeof window !== "undefined") {
+      window.getSelection()?.removeAllRanges();
+    }
+    setPdfTextSelection(null);
+  };
+
+  const openNoteComposerFromSelection = (selection: PdfTextSelection) => {
+    setComposeNote({
+      page: selection.page,
+      preset: selection.text.trim() ? `> ${selection.text.trim()}\n\n` : "",
+    });
+    if (typeof window !== "undefined") {
+      window.getSelection()?.removeAllRanges();
+    }
+    setPdfTextSelection(null);
+  };
+
+  const submitNoteFromComposer = (body: string) => {
+    if (!composeNote) {
+      return;
+    }
+    const trimmed = body.trim();
+    if (!trimmed) {
+      setComposeNote(null);
+      return;
+    }
+    createNoteMutation.mutate({ fileId, page: composeNote.page, body: trimmed });
+    setComposeNote(null);
   };
 
   const toggleFullscreen = async () => {
@@ -828,6 +1003,28 @@ export default function FileViewerPage() {
                         );
                       })}
                     </div>
+                    <p className="mb-2 mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Highlight color</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {HIGHLIGHT_COLOR_OPTIONS.map((option) => {
+                        const selected = highlightColor === option.id;
+                        return (
+                          <button
+                            key={`highlight-color-default-${option.id}`}
+                            type="button"
+                            onClick={() => setHighlightColor(option.id)}
+                            className={[
+                              "flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs transition",
+                              selected
+                                ? "border-blue-300 bg-blue-50 text-blue-700"
+                                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                            ].join(" ")}
+                          >
+                            <span className="inline-flex h-4 w-4 rounded-sm border border-slate-300" style={{ backgroundColor: option.swatch }} />
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
                     <p className="mb-2 mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Page color</p>
                     <div className="grid grid-cols-3 gap-2">
                       {PAGE_TONE_OPTIONS.map((option) => {
@@ -898,6 +1095,107 @@ export default function FileViewerPage() {
           </div>
         )}
 
+        {!isFullscreen && (highlights.length > 0 || highlightsQuery.isLoading) && (
+          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Highlights ({highlights.length})
+              </p>
+              <p className="text-[11px] text-slate-500">Select text in the PDF to add</p>
+            </div>
+            <div className="flex flex-col gap-2">
+              {highlights.map((highlight) => {
+                const colorId = resolveHighlightColorId(highlight.color);
+                const swatch = getHighlightSwatch(colorId);
+                return (
+                  <div
+                    key={highlight.id}
+                    className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white p-2 text-xs"
+                  >
+                    <span
+                      className="mt-1 inline-block h-3 w-3 shrink-0 rounded-sm border border-slate-300"
+                      style={{ backgroundColor: swatch }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage(highlight.page)}
+                      className="flex-1 text-left"
+                    >
+                      <p className="font-medium text-slate-800">Page {highlight.page}</p>
+                      <p className="mt-0.5 line-clamp-3 text-slate-600">“{highlight.text}”</p>
+                    </button>
+                    <div className="flex items-center gap-1">
+                      <select
+                        value={colorId}
+                        onChange={(event) =>
+                          updateHighlightColorMutation.mutate({
+                            id: highlight.id,
+                            color: event.target.value as HighlightColorId,
+                          })
+                        }
+                        className="rounded-md border border-slate-300 bg-white px-1 py-0.5 text-[11px] text-slate-700"
+                        aria-label="Change highlight color"
+                      >
+                        {HIGHLIGHT_COLOR_OPTIONS.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => deleteHighlightMutation.mutate(highlight.id)}
+                        className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-rose-600 hover:bg-rose-50"
+                        aria-label="Delete highlight"
+                        title="Delete highlight"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {!isFullscreen && (
+          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Notes ({notes.length})
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  setComposeNote({
+                    page: visiblePages[0] ?? currentPage,
+                    preset: "",
+                  })
+                }
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                + Add note for page {visiblePages[0] ?? currentPage}
+              </button>
+            </div>
+            {notes.length === 0 ? (
+              <p className="text-[11px] text-slate-500">No notes yet — select text in the PDF and choose “Add note”.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {notes.map((note) => (
+                  <NoteRow
+                    key={note.id}
+                    note={note}
+                    onJumpToPage={() => setCurrentPage(note.page)}
+                    onUpdate={(body) => updateNoteMutation.mutate({ id: note.id, body })}
+                    onDelete={() => deleteNoteMutation.mutate(note.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div
           className={[
             "min-w-0 max-w-full overflow-x-clip rounded-xl border border-slate-200 bg-slate-100 p-2 sm:p-4",
@@ -930,6 +1228,9 @@ export default function FileViewerPage() {
                 );
               }}
               bookmarkedPages={bookmarkedPages}
+              pageHighlights={projectedPageHighlights}
+              defaultHighlightColor={getHighlightSwatch(highlightColor)}
+              onPdfTextSelected={setPdfTextSelection}
             />
         </div>
       </div>
@@ -940,7 +1241,269 @@ export default function FileViewerPage() {
         stackZClass={isFullscreen ? "z-[70]" : "z-40"}
         readerFullscreen={isFullscreen}
       />
+
+      {pdfTextSelection ? (
+        <SelectionToolbar
+          selection={pdfTextSelection}
+          highlightColor={getHighlightSwatch(highlightColor)}
+          onHighlight={() => saveHighlightFromSelection(pdfTextSelection)}
+          onAddNote={() => openNoteComposerFromSelection(pdfTextSelection)}
+          onCopy={() => {
+            if (typeof navigator !== "undefined" && navigator.clipboard) {
+              void navigator.clipboard.writeText(pdfTextSelection.text);
+            }
+          }}
+          onDismiss={() => {
+            if (typeof window !== "undefined") {
+              window.getSelection()?.removeAllRanges();
+            }
+            setPdfTextSelection(null);
+          }}
+        />
+      ) : null}
+
+      {composeNote ? (
+        <NoteComposerDialog
+          page={composeNote.page}
+          initialBody={composeNote.preset}
+          isSubmitting={createNoteMutation.isPending}
+          onCancel={() => setComposeNote(null)}
+          onSubmit={submitNoteFromComposer}
+        />
+      ) : null}
     </section>
+  );
+}
+
+interface SelectionToolbarProps {
+  selection: PdfTextSelection;
+  highlightColor: string;
+  onHighlight: () => void;
+  onAddNote: () => void;
+  onCopy: () => void;
+  onDismiss: () => void;
+}
+
+/**
+ * Floating toolbar anchored to the user's current PDF text selection. Lives in a `position:fixed`
+ * container that follows the selection's bounding rect, so it survives scroll / fullscreen / pinch
+ * zoom without manual positioning math.
+ */
+function SelectionToolbar({
+  selection,
+  highlightColor,
+  onHighlight,
+  onAddNote,
+  onCopy,
+  onDismiss,
+}: SelectionToolbarProps) {
+  const top = Math.max(8, selection.rect.top - 44);
+  const left = Math.max(8, selection.rect.left + selection.rect.width / 2);
+  return (
+    <div
+      role="toolbar"
+      aria-label="PDF text selection actions"
+      style={{
+        position: "fixed",
+        top,
+        left,
+        transform: "translateX(-50%)",
+        zIndex: 80,
+      }}
+      className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-1 py-1 text-xs shadow-lg backdrop-blur"
+      onMouseDown={(event) => {
+        /** Prevent click on the toolbar from collapsing the underlying selection. */
+        event.preventDefault();
+      }}
+    >
+      <button
+        type="button"
+        onClick={onHighlight}
+        className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-800 transition hover:bg-slate-100"
+        title={`Highlight ${selection.text.length > 18 ? `${selection.text.slice(0, 18)}…` : selection.text}`}
+      >
+        <span
+          className="inline-block h-3 w-3 rounded-sm border border-slate-300"
+          style={{ backgroundColor: highlightColor }}
+        />
+        Highlight
+      </button>
+      <button
+        type="button"
+        onClick={onCopy}
+        className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-100"
+        title="Copy selected text"
+      >
+        Copy
+      </button>
+      <button
+        type="button"
+        onClick={onAddNote}
+        className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-100"
+        title="Open the note composer with this text quoted"
+      >
+        Add note
+      </button>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="rounded-full px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-slate-100"
+        aria-label="Dismiss selection toolbar"
+        title="Dismiss"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+interface NoteComposerDialogProps {
+  page: number;
+  initialBody: string;
+  isSubmitting: boolean;
+  onSubmit: (body: string) => void;
+  onCancel: () => void;
+}
+
+function NoteComposerDialog({
+  page,
+  initialBody,
+  isSubmitting,
+  onSubmit,
+  onCancel,
+}: NoteComposerDialogProps) {
+  const [body, setBody] = useState(initialBody);
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Add note for page ${page}`}
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/40 px-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onCancel();
+        }
+      }}
+    >
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-sm font-semibold text-slate-900">Note for page {page}</p>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-full px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100"
+            aria-label="Close note composer"
+          >
+            ✕
+          </button>
+        </div>
+        <textarea
+          autoFocus
+          value={body}
+          onChange={(event) => setBody(event.target.value)}
+          placeholder="Write your note…"
+          className="ui-input min-h-[140px] resize-y"
+        />
+        <div className="mt-3 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!body.trim() || isSubmitting}
+            onClick={() => onSubmit(body)}
+            className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSubmitting ? "Saving…" : "Save note"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface NoteRowProps {
+  note: NoteItem;
+  onJumpToPage: () => void;
+  onUpdate: (body: string) => void;
+  onDelete: () => void;
+}
+
+function NoteRow({ note, onJumpToPage, onUpdate, onDelete }: NoteRowProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(note.body);
+  useEffect(() => {
+    if (!editing) {
+      setDraft(note.body);
+    }
+  }, [editing, note.body]);
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-2 text-xs">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={onJumpToPage}
+          className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-800"
+        >
+          Page {note.page}
+        </button>
+        <div className="flex items-center gap-1">
+          {editing ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdate(draft);
+                  setEditing(false);
+                }}
+                className="rounded-md bg-slate-900 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-slate-700"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={onDelete}
+                className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-rose-600 hover:bg-rose-50"
+                aria-label="Delete note"
+              >
+                ✕
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {editing ? (
+        <textarea
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          className="ui-input mt-2 min-h-[80px] resize-y text-xs"
+        />
+      ) : (
+        <p className="mt-1 whitespace-pre-wrap text-slate-700">{note.body}</p>
+      )}
+    </div>
   );
 }
 
@@ -970,6 +1533,10 @@ function getBookmarkColorStorageKey(fileId: string): string {
   return `bookmarkColor:${fileId}`;
 }
 
+function getHighlightColorStorageKey(fileId: string): string {
+  return `highlightColor:${fileId}`;
+}
+
 function getPageToneStorageKey(fileId: string): string {
   return `pageTone:${fileId}`;
 }
@@ -988,6 +1555,10 @@ function isPageToneId(value: string): value is PageToneId {
 
 function isCoverToneId(value: string): value is CoverToneId {
   return COVER_TONE_OPTIONS.some((option) => option.id === value);
+}
+
+function isHighlightColorId(value: string): value is HighlightColorId {
+  return HIGHLIGHT_COLOR_OPTIONS.some((option) => option.id === value);
 }
 
 function getBookmarkButtonStyle(

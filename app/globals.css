@@ -304,6 +304,33 @@ a {
   transform-origin: center center;
 }
 
+/**
+ * PDF text selection / copy support.
+ * react-pdf renders the text layer as transparent `<span>`s overlapping the canvas. We
+ * explicitly opt the text layer into selection so users can highlight + copy text even
+ * when the surrounding `BookPage` div sets a "navigation" cursor / role="button". The
+ * `data-pdf-page-number` wrapper is what `pdf-viewer.tsx`'s selection effect uses to
+ * identify which page the user just selected.
+ */
+.pdf-selectable-page,
+.pdf-selectable-page .react-pdf__Page,
+.pdf-selectable-page .react-pdf__Page__textContent,
+.pdf-selectable-page .textLayer {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default;
+}
+
+.pdf-selectable-page .textLayer,
+.pdf-selectable-page .react-pdf__Page__textContent {
+  cursor: text;
+}
+
+.pdf-selectable-page .textLayer ::selection,
+.pdf-selectable-page .react-pdf__Page__textContent ::selection {
+  background: rgba(125, 211, 252, 0.45);
+}
+
 /* PDF viewer fullscreen: fill display; only notch safe-area — no extra top gutter */
 section.pdf-viewer-fullscreen-host:fullscreen {
   box-sizing: border-box;
