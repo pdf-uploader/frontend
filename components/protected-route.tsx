@@ -6,26 +6,36 @@ import { hasAuthSession } from "@/lib/auth-session";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { ReactNode } from "react";
 
-const PUBLIC_ROUTES = new Set(["/", "/login", "/signup"]);
+/**
+ * Public-facing IMME pages do NOT require a session — anyone landing on `/`, `/about`,
+ * `/manuals`, etc. should see the project information immediately. Auth gating only kicks in
+ * for the staff workspace prefixes. The auth pages themselves (`/login`, `/signup`) bounce
+ * to home if a session is already active so we don't show a login UI to a signed-in user.
+ */
+const STAFF_PREFIXES = ["/admin", "/users", "/dashboard", "/folders", "/files", "/search"];
+
+function isStaffRoute(pathname: string): boolean {
+  return STAFF_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "/";
   const router = useRouter();
   const auth = useAuth();
   const loggedIn = hasAuthSession(auth);
-  const isPublic = PUBLIC_ROUTES.has(pathname);
+  const isStaff = isStaffRoute(pathname);
 
   useEffect(() => {
-    if (!loggedIn && !isPublic) {
-      router.replace("/");
+    if (isStaff && !loggedIn) {
+      router.replace("/login");
     }
     if (loggedIn && (pathname === "/login" || pathname === "/signup")) {
-      router.replace("/");
+      router.replace("/search");
     }
-  }, [loggedIn, isPublic, pathname, router]);
+  }, [loggedIn, isStaff, pathname, router]);
 
-  if (!loggedIn && !isPublic) {
-    return <div className="p-6 text-sm text-slate-600">Checking session...</div>;
+  if (isStaff && !loggedIn) {
+    return <div className="p-6 text-sm text-imme-muted">Checking session…</div>;
   }
 
   return <>{children}</>;

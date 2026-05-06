@@ -41,7 +41,7 @@ export default function UsersPage() {
 
   useEffect(() => {
     if (user && !isAdminUser(user)) {
-      router.replace("/");
+      router.replace("/search");
     }
   }, [router, user]);
 

@@ -43,7 +43,7 @@ export default function LoginPage() {
 
   const loginMutation = useMutation({
     mutationFn: async () => signIn(email.trim(), password),
-    onSuccess: () => router.replace("/"),
+    onSuccess: () => router.replace("/search"),
   });
 
   const onSubmitEmail = async (event: FormEvent<HTMLFormElement>) => {

@@ -1,21 +1,45 @@
 import type { Metadata, Viewport } from "next";
+import { Inter, JetBrains_Mono, Montserrat } from "next/font/google";
 import "@/app/globals.css";
 import { AppProviders } from "@/lib/providers";
 import { OAuthFlashBanner } from "@/components/oauth-flash-banner";
 import { ProtectedRoute } from "@/components/protected-route";
-import { Navbar } from "@/components/navbar";
 import { Suspense } from "react";
 import { MainShell } from "@/components/main-shell";
 import { PWARegister } from "@/components/pwa-register";
 
+const interSans = Inter({
+  subsets: ["latin"],
+  variable: "--font-imme-sans",
+  display: "swap",
+});
+
+const montserratDisplay = Montserrat({
+  subsets: ["latin"],
+  weight: ["500", "600", "700", "800"],
+  variable: "--font-imme-display",
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-imme-mono",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "File Management",
-  description: "File management and search frontend",
+  title: {
+    default: "IMME Project — Uganda Expressways",
+    template: "%s — IMME Project",
+  },
+  description:
+    "KOICA-funded Korea–Uganda cooperation delivering integrated lifecycle manuals and a bridge management system pilot for Uganda's expressways.",
   manifest: "/mainfest.json",
-  applicationName: "Interactive File Management",
+  applicationName: "IMME Project",
   appleWebApp: {
     capable: true,
-    title: "File Management",
+    title: "IMME Project",
     statusBarStyle: "black-translucent",
   },
   icons: {
@@ -31,17 +55,19 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#0f172a",
+  themeColor: "#1A2D4F",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html
+      lang="en"
+      className={`${interSans.variable} ${montserratDisplay.variable} ${jetbrainsMono.variable}`}
+    >
       <body>
         <AppProviders>
           <PWARegister />
           <ProtectedRoute>
-            <Navbar />
             <OAuthFlashBanner />
             <Suspense fallback={<main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>}>
               <MainShell>{children}</MainShell>
