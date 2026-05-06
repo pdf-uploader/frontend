@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import BookHomepage from "@/components/BookHomepage";
 import { BrandedBottomConsultants } from "@/components/branded-logos-shell";
 import { FolderBrowser } from "@/components/folder-browser";
-import { HomeScrollSequence } from "@/components/home-scroll-sequence";
 import { hasAuthSession } from "@/lib/auth-session";
 import { useAuth } from "@/lib/hooks/use-auth";
 
 export default function HomePage() {
+  const router = useRouter();
   const auth = useAuth();
   const [isHydrated, setIsHydrated] = useState(false);
 
@@ -18,7 +20,7 @@ export default function HomePage() {
   const isLoggedIn = hasAuthSession(auth);
 
   if (!isHydrated || !isLoggedIn) {
-    return <HomeScrollSequence />;
+    return <BookHomepage onLoginClick={() => router.push("/login")} />;
   }
 
   return (
