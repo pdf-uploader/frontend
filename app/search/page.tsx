@@ -1,11 +1,16 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { FolderBrowser } from "@/components/folder-browser";
-
-/**
- * Staff document library: folder list, global file search, uploads (when permitted).
- * Routed under `/search` so it inherits `MainShell` staff chrome (`Navbar` + `ui-shell`).
- */
-export default function SearchPage() {
-  return <FolderBrowser />;
+/** Historical `/search` URL → dashboard; preserves `?keyword=` for bookmarks and links. */
+export default async function SearchRedirectPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ keyword?: string | string[] }>;
+}) {
+  const sp = await searchParams;
+  const raw = sp.keyword;
+  const kw = typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : "";
+  const q = new URLSearchParams();
+  if (kw) q.set("keyword", kw);
+  const qs = q.toString();
+  redirect(qs ? `/dashboard?${qs}` : "/dashboard");
 }

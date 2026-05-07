@@ -51,7 +51,7 @@ export default function LoginPage() {
   });
   const loginMutation = useMutation({
     mutationFn: async () => signIn(email.trim(), password),
-    onSuccess: () => router.replace("/search"),
+    onSuccess: () => router.replace("/dashboard"),
   });
 
   const onSubmitEmail = async (event: FormEvent<HTMLFormElement>) => {
@@ -289,7 +289,6 @@ export default function LoginPage() {
                 label="Password"
                 value={password}
                 autoComplete="current-password"
-                placeholder="••••••••"
                 focused={focusedField === "password"}
                 onFocus={() => setFocusedField("password")}
                 onBlur={() => setFocusedField(null)}

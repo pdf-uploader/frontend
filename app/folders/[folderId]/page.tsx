@@ -17,51 +17,68 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useDebounce } from "use-debounce";
 import axios from "axios";
 import { DocumentChatWidget } from "@/components/document-chat-widget";
+import { BookshelfView, ListView } from "@/components/folder-bookshelf";
 import { isAdminUser } from "@/lib/auth-user";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { Folder, FolderFile } from "@/lib/types";
 
+// ─── Design tokens ────────────────────────────────────────────────────────────
+
+const C = {
+  navy:    "#1a2744",
+  gold:    "#c97c2a",
+  paper:   "#faf8f3",
+  border:  "#d0c4aa",
+  muted:   "#8a7a60",
+  textMid: "#6a5a40",
+  bg:      "#f4f1ec",
+};
+const fontSerif   = "'Source Serif 4', Georgia, serif";
+const fontDisplay = "'Playfair Display', 'Times New Roman', serif";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface FileVersionItem {
   id: string;
   filename: string;
   createdAt: string;
-  content?: Array<{
-    page: number;
-    content: string;
-  }>;
+  content?: Array<{ page: number; content: string }>;
 }
 
 const PAGE_CHUNK_SIZE = 5;
 type FileSortField = "filename" | "createdAt" | "number";
-type SortDirection = "desc" | "asc";
+type SortDirection  = "desc" | "asc";
+type UploadUiPhase  = "idle" | "uploading" | "done" | "error";
+type ViewMode       = "bookshelf" | "list";
 
-type UploadUiPhase = "idle" | "uploading" | "done" | "error";
+// ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function FolderPage() {
-  const params = useParams<{ folderId: string }>();
-  const pathname = usePathname();
-  const router = useRouter();
+  const params       = useParams<{ folderId: string }>();
+  const pathname     = usePathname();
+  const router       = useRouter();
   const searchParams = useSearchParams();
-  const folderId = params.folderId;
-  const { user } = useAuth();
-  const admin = isAdminUser(user);
-  const urlKeyword = searchParams.get("keyword") ?? "";
-  const [folderSearch, setFolderSearch] = useState(urlKeyword);
-  const [dragging, setDragging] = useState(false);
-  const [dragCounter, setDragCounter] = useState(0);
-  const [orderedFiles, setOrderedFiles] = useState<FolderFile[]>([]);
-  const [fileSortField, setFileSortField] = useState<FileSortField | null>(null);
+  const folderId     = params.folderId;
+  const { user }     = useAuth();
+  const admin        = isAdminUser(user);
+  const urlKeyword   = searchParams.get("keyword") ?? "";
+
+  const [folderSearch,      setFolderSearch]      = useState(urlKeyword);
+  const [dragging,          setDragging]          = useState(false);
+  const [dragCounter,       setDragCounter]       = useState(0);
+  const [orderedFiles,      setOrderedFiles]      = useState<FolderFile[]>([]);
+  const [fileSortField,     setFileSortField]     = useState<FileSortField | null>(null);
   const [fileSortDirection, setFileSortDirection] = useState<SortDirection>("desc");
+  const [viewMode,          setViewMode]          = useState<ViewMode>("bookshelf");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploadUi, setUploadUi] = useState<{
-    phase: UploadUiPhase;
-    percent: number;
-    indeterminate: boolean;
-    fileCount: number;
+    phase: UploadUiPhase; percent: number; indeterminate: boolean; fileCount: number;
   }>({ phase: "idle", percent: 0, indeterminate: false, fileCount: 0 });
+
   const [debouncedFolderSearch] = useDebounce(folderSearch, 300);
 
+  // ── Data queries ──
   const folderQuery = useQuery({
     queryKey: ["folder", folderId],
     queryFn: async () => {
@@ -69,10 +86,8 @@ export default function FolderPage() {
         return (await api.get<Folder>(`/folders/${folderId}`)).data;
       } catch {
         const folders = (await api.get<Folder[]>("/folders")).data;
-        const matched = folders.find((folder) => folder.id === folderId);
-        if (!matched) {
-          throw new Error("Folder not found");
-        }
+        const matched  = folders.find((f) => f.id === folderId);
+        if (!matched) throw new Error("Folder not found");
         return matched;
       }
     },
@@ -82,54 +97,34 @@ export default function FolderPage() {
   const uploadMutation = useMutation({
     mutationFn: async (files: File[]) => {
       const formData = new FormData();
-      files.forEach((file) => formData.append("pdf", file));
+      files.forEach((f) => formData.append("pdf", f));
       await api.post(`/files/upload/${folderId}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         onUploadProgress: (event) => {
           const total = event.total ?? 0;
           if (total > 0) {
             const percent = Math.min(100, Math.round((event.loaded / total) * 100));
-            setUploadUi((previous) => ({
-              ...previous,
-              phase: "uploading",
-              percent,
-              indeterminate: false,
-            }));
+            setUploadUi((prev) => ({ ...prev, phase: "uploading", percent, indeterminate: false }));
           }
         },
       });
     },
     onMutate: (files: File[]) => {
-      setUploadUi({
-        phase: "uploading",
-        percent: 0,
-        indeterminate: true,
-        fileCount: files.length,
-      });
+      setUploadUi({ phase: "uploading", percent: 0, indeterminate: true, fileCount: files.length });
     },
     onSuccess: () => {
-      setUploadUi((previous) => ({
-        ...previous,
-        phase: "done",
-        percent: 100,
-        indeterminate: false,
-      }));
+      setUploadUi((prev) => ({ ...prev, phase: "done", percent: 100, indeterminate: false }));
       void folderQuery.refetch();
     },
     onError: () => {
-      setUploadUi((previous) => ({
-        ...previous,
-        phase: "error",
-        percent: 0,
-        indeterminate: false,
-      }));
+      setUploadUi((prev) => ({ ...prev, phase: "error", percent: 0, indeterminate: false }));
     },
   });
 
   const deleteFileMutation = useMutation({
     mutationFn: async (fileId: string) => api.delete(`/files/${fileId}`),
-    onSuccess: (_, deletedFileId) => {
-      setOrderedFiles((prev) => prev.filter((file) => file.id !== deletedFileId));
+    onSuccess: (_, deletedId) => {
+      setOrderedFiles((prev) => prev.filter((f) => f.id !== deletedId));
       folderQuery.refetch();
     },
   });
@@ -137,113 +132,98 @@ export default function FolderPage() {
   const folderSearchQuery = useQuery({
     queryKey: ["folder-search", folderId, debouncedFolderSearch],
     queryFn: async () =>
-      (await api.get<FileVersionItem[]>(`/folders/${folderId}/find`, { params: { keyword: debouncedFolderSearch } }))
-        .data,
+      (await api.get<FileVersionItem[]>(`/folders/${folderId}/find`, {
+        params: { keyword: debouncedFolderSearch },
+      })).data,
     enabled: debouncedFolderSearch.trim().length > 0,
   });
 
   const folder = folderQuery.data;
-  const fileOrderSignature = folder?.files.map((file) => file.id).join("|") ?? "";
+  const fileOrderSignature = folder?.files.map((f) => f.id).join("|") ?? "";
+
   const searchContextHref = (() => {
-    const params = new URLSearchParams();
-    const trimmed = folderSearch.trim();
-    if (trimmed) {
-      params.set("keyword", trimmed);
-    }
-    const queryString = params.toString();
-    return queryString ? `${pathname}?${queryString}` : pathname;
+    const p = new URLSearchParams();
+    const t = folderSearch.trim();
+    if (t) p.set("keyword", t);
+    const q = p.toString();
+    return q ? `${pathname}?${q}` : pathname;
   })();
 
   useEffect(() => {
-    if (folder) {
-      setOrderedFiles(folder.files);
-    }
+    if (folder) setOrderedFiles(folder.files);
   }, [fileOrderSignature, folder]);
 
-  useEffect(() => {
-    setFolderSearch(urlKeyword);
-  }, [urlKeyword]);
+  useEffect(() => { setFolderSearch(urlKeyword); }, [urlKeyword]);
 
   useEffect(() => {
-    if (uploadUi.phase !== "done") {
-      return;
-    }
-    const timer = window.setTimeout(() => {
+    if (uploadUi.phase !== "done") return;
+    const t = window.setTimeout(() => {
       setUploadUi({ phase: "idle", percent: 0, indeterminate: false, fileCount: 0 });
     }, 2800);
-    return () => window.clearTimeout(timer);
+    return () => window.clearTimeout(t);
   }, [uploadUi.phase]);
 
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString());
-    const trimmed = debouncedFolderSearch.trim();
-    if (trimmed) {
-      params.set("keyword", trimmed);
-    } else {
-      params.delete("keyword");
-    }
-
-    const currentQuery = searchParams.toString();
-    const nextQuery = params.toString();
-    if (currentQuery === nextQuery) {
-      return;
-    }
-
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+    const p = new URLSearchParams(searchParams.toString());
+    const t = debouncedFolderSearch.trim();
+    if (t) { p.set("keyword", t); } else { p.delete("keyword"); }
+    const nextQ = p.toString();
+    if (searchParams.toString() === nextQ) return;
+    router.replace(nextQ ? `${pathname}?${nextQ}` : pathname, { scroll: false });
   }, [debouncedFolderSearch, pathname, router, searchParams]);
 
   const visibleFiles = useMemo(() => {
-    if (!fileSortField) {
-      return orderedFiles;
-    }
-
+    if (!fileSortField) return orderedFiles;
     const sorted = [...orderedFiles];
     sorted.sort((a, b) => {
       if (fileSortField === "number") {
-        const compared = compareVersionLikeFilename(a.filename, b.filename);
-        return fileSortDirection === "desc" ? -compared : compared;
+        const c = compareVersionLikeFilename(a.filename, b.filename);
+        return fileSortDirection === "desc" ? -c : c;
       }
-
       if (fileSortField === "filename") {
-        const compared = a.filename.localeCompare(b.filename, "en", { sensitivity: "base" });
-        return fileSortDirection === "desc" ? -compared : compared;
+        const c = a.filename.localeCompare(b.filename, "en", { sensitivity: "base" });
+        return fileSortDirection === "desc" ? -c : c;
       }
-
-      const left = new Date(a.createdAt).getTime();
-      const right = new Date(b.createdAt).getTime();
-      const compared = left - right;
-      return fileSortDirection === "desc" ? -compared : compared;
+      const l = new Date(a.createdAt).getTime();
+      const r = new Date(b.createdAt).getTime();
+      return fileSortDirection === "desc" ? r - l : l - r;
     });
     return sorted;
   }, [fileSortDirection, fileSortField, orderedFiles]);
 
+  // ── Early returns ──
   if (folderQuery.isLoading) {
-    return <p className="text-sm text-slate-600">Loading folder...</p>;
+    return (
+      <div style={{ padding: "48px 24px", fontFamily: fontSerif, color: C.muted, fontSize: 14 }}>
+        Loading folder…
+      </div>
+    );
   }
-
   if (folderQuery.error || !folder) {
-    return <p className="text-sm text-red-600">Folder not found or unavailable.</p>;
+    return (
+      <div style={{ padding: "48px 24px", fontFamily: fontSerif, color: "#c0392b", fontSize: 14 }}>
+        Folder not found or unavailable.
+      </div>
+    );
   }
 
   const folderLocked = folder.lock === true;
+  /** Locked folders block members only; admins can still upload/manage files. */
+  const uploadBlockedForUser = folderLocked && !admin;
 
   const onDropped = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     setDragging(false);
     setDragCounter(0);
-    if (!admin || folderLocked) return;
+    if (!admin || uploadBlockedForUser) return;
     const files = collectPdfFiles(event.dataTransfer.files);
-    if (files.length) {
-      uploadMutation.mutate(files);
-    }
+    if (files.length) uploadMutation.mutate(files);
   };
 
   const onFilePick = (event: ChangeEvent<HTMLInputElement>) => {
-    if (!admin || folderLocked) return;
+    if (!admin || uploadBlockedForUser) return;
     const files = collectPdfFiles(event.target.files ?? []);
-    if (files.length) {
-      uploadMutation.mutate(files);
-    }
+    if (files.length) uploadMutation.mutate(files);
     event.target.value = "";
   };
 
@@ -253,209 +233,336 @@ export default function FolderPage() {
       setFileSortDirection("desc");
       return;
     }
-    setFileSortDirection((previous) => (previous === "desc" ? "asc" : "desc"));
+    setFileSortDirection((prev) => (prev === "desc" ? "asc" : "desc"));
   };
 
+  const volumeLabel = visibleFiles.length === 1 ? "1 volume" : `${visibleFiles.length} volumes`;
+
+  // ── Main render ──
   return (
-    <section
-      className={`ui-shell space-y-5 ${dragging ? "rounded-2xl ring-2 ring-slate-300 ring-offset-2" : ""}`}
-      onDragOver={(event) => {
-        if (!admin || folderLocked) return;
-        event.preventDefault();
-      }}
-      onDragEnter={(event) => {
-        if (!admin || folderLocked) return;
-        event.preventDefault();
-        setDragCounter((prev) => prev + 1);
-        setDragging(true);
-      }}
-      onDragLeave={(event) => {
-        if (!admin || folderLocked) return;
-        event.preventDefault();
-        setDragCounter((prev) => {
-          const next = Math.max(0, prev - 1);
-          if (next === 0) {
-            setDragging(false);
-          }
-          return next;
-        });
-      }}
-      onDrop={(event) => {
-        if (!admin || folderLocked) return;
-        onDropped(event);
-      }}
-    >
-      {admin && !folderLocked && dragging && (
-        <div className="sticky top-20 z-10 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm">
-          Drop files anywhere on this page to upload to this folder.
-        </div>
-      )}
+    <>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Source+Serif+4:ital,wght@0,300;0,400;1,300&display=swap"
+      />
 
-      <div className="space-y-2">
-        <Link href="/" className="ui-btn-back w-fit">
-          Back to library
-        </Link>
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {folderLocked ? "🔒" : "📁"} {folder.foldername}
-          </h1>
-          {folderLocked && (
-            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium uppercase text-amber-800">
-              Locked
-            </span>
-          )}
-        </div>
-        {folderLocked && (
-          <p className="max-w-2xl text-sm text-slate-600">
-            This folder is locked. Uploads and file deletion are disabled until an admin unlocks it from the library
-            home.
-          </p>
+      <section
+        style={{
+          background: C.bg,
+          minHeight: "100vh",
+          padding: "0 0 64px",
+          position: "relative",
+        }}
+        onDragOver={(e)  => { if (!admin || uploadBlockedForUser) return; e.preventDefault(); }}
+        onDragEnter={(e) => {
+          if (!admin || uploadBlockedForUser) return;
+          e.preventDefault();
+          setDragCounter((p) => p + 1);
+          setDragging(true);
+        }}
+        onDragLeave={(e) => {
+          if (!admin || uploadBlockedForUser) return;
+          e.preventDefault();
+          setDragCounter((p) => {
+            const n = Math.max(0, p - 1);
+            if (n === 0) setDragging(false);
+            return n;
+          });
+        }}
+        onDrop={onDropped}
+      >
+        {/* Global drag-over banner */}
+        {admin && !uploadBlockedForUser && dragging && (
+          <div style={{
+            position: "sticky", top: 80, zIndex: 50,
+            background: C.paper, border: `1px solid ${C.gold}`,
+            borderRadius: 4, padding: "10px 16px",
+            fontFamily: fontSerif, fontSize: 13, color: C.navy,
+            boxShadow: "0 2px 12px rgba(201,124,42,0.14)",
+            margin: "0 24px",
+          }}>
+            Drop PDF files anywhere on this page to upload.
+          </div>
         )}
-      </div>
 
-      <div className="ui-card p-4">
-        <div className="relative">
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">🔍</span>
-          <input
-            value={folderSearch}
-            onChange={(event) => setFolderSearch(event.target.value)}
-            className="ui-search-input"
-            placeholder="Search filename in this folder..."
-          />
-        </div>
-        {folderSearchQuery.data && (
-          <ul className="mt-2 space-y-2 text-sm">
-            {folderSearchQuery.data.map((item) => (
-              <FolderSearchItem
-                key={item.id}
-                item={item}
-                keyword={debouncedFolderSearch}
-                returnTo={encodeURIComponent(searchContextHref)}
-              />
-            ))}
-            {!folderSearchQuery.data.length && <li className="text-xs text-slate-500">No matching files.</li>}
-          </ul>
-        )}
-      </div>
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px" }}>
 
-      {admin && (
-        <PdfUploadDropZone
-          locked={folderLocked}
-          fileInputRef={fileInputRef}
-          uploadPhase={uploadUi.phase}
-          uploadPercent={uploadUi.percent}
-          uploadIndeterminate={uploadUi.indeterminate}
-          uploadFileCount={uploadUi.fileCount}
-          onFilePick={onFilePick}
-          onUploadFiles={(files) => uploadMutation.mutate(files)}
-        />
-      )}
+          {/* ─────────────── Change 1 — Page header ─────────────── */}
+          <div style={{ paddingTop: 24 }}>
 
-      <div className="ui-card-soft border-dashed p-4 text-sm">
-        {admin ? (
-          <div className="space-y-3">
-            {!folderLocked && (
-              <p className="text-xs text-slate-500">
-                You can also drop PDF files anywhere on this page while viewing this folder.
+            {/* Back */}
+            <div style={{ marginBottom: 12 }}>
+              <button
+                type="button"
+                onClick={() => router.push("/dashboard")}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 8,
+                  fontFamily: fontSerif, fontSize: 13, color: C.navy,
+                  background: "#fff",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 4,
+                  padding: "6px 14px",
+                  cursor: "pointer",
+                  transition: "border-color 150ms, box-shadow 150ms",
+                }}
+                aria-label="Back to dashboard"
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = C.gold;
+                  (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 2px 8px rgba(201,124,42,0.12)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = C.border;
+                  (e.currentTarget as HTMLButtonElement).style.boxShadow = "none";
+                }}
+              >
+                <span aria-hidden style={{ fontSize: 15, lineHeight: 1 }}>←</span>
+                Back to dashboard
+              </button>
+            </div>
+
+            {/* Title */}
+            <h1 style={{
+              fontFamily: fontDisplay, fontSize: 28, fontWeight: 700,
+              color: C.navy, margin: 0, lineHeight: 1.15,
+            }}>
+              {folder.foldername}
+            </h1>
+
+            {/* Gold divider */}
+            <div style={{
+              width: 36, height: 1.5, background: C.gold,
+              borderRadius: 1, margin: "10px 0 8px",
+            }} />
+
+            {/* Volume count */}
+            <p style={{
+              fontFamily: fontSerif, fontSize: 13, fontStyle: "italic",
+              color: C.muted, margin: 0,
+            }}>
+              {visibleFiles.length === 0 ? "No volumes" : volumeLabel}
+            </p>
+
+            {folderLocked && !admin && (
+              <p style={{
+                fontFamily: fontSerif, fontSize: 13, color: C.muted,
+                marginTop: 8, maxWidth: 520,
+              }}>
+                This manual is restricted. Only authorized accounts can browse these volumes.
               </p>
             )}
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
-              <p className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sort</p>
-              <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1">
-                <button
-                  type="button"
-                  onClick={() => toggleFileSort("filename")}
-                  className={[
-                    "rounded-full px-3 py-1.5 font-medium transition",
-                    fileSortField === "filename"
-                      ? "bg-slate-900 text-white shadow-sm"
-                      : "text-slate-600 hover:bg-white hover:text-slate-900",
-                  ].join(" ")}
-                >
-                  Filename {fileSortField === "filename" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleFileSort("number")}
-                  className={[
-                    "rounded-full px-3 py-1.5 font-medium transition",
-                    fileSortField === "number"
-                      ? "bg-slate-900 text-white shadow-sm"
-                      : "text-slate-600 hover:bg-white hover:text-slate-900",
-                  ].join(" ")}
-                >
-                  Number {fileSortField === "number" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleFileSort("createdAt")}
-                  className={[
-                    "rounded-full px-3 py-1.5 font-medium transition",
-                    fileSortField === "createdAt"
-                      ? "bg-slate-900 text-white shadow-sm"
-                      : "text-slate-600 hover:bg-white hover:text-slate-900",
-                  ].join(" ")}
-                >
-                  Created {fileSortField === "createdAt" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}
-                </button>
-              </div>
-            </div>
           </div>
-        ) : (
-          <p>Files in this folder</p>
-        )}
-      </div>
 
-      <ul className="ui-card space-y-2 p-3">
-        {visibleFiles.map((file) => (
-          <li
-            key={file.id}
-            className="flex items-center justify-between rounded border border-slate-200 px-3 py-2 text-sm transition"
-          >
-            <div className="flex min-w-0 items-center gap-2">
-              <Link href={`/files/${file.id}`} className="truncate break-keep text-slate-700 hover:underline">
-                📄 {file.filename}
-              </Link>
+          {/* ─────────────── Change 4 — Search bar ─────────────── */}
+          <div style={{ marginTop: 28 }}>
+            <div style={{ position: "relative", maxWidth: 480 }}>
+              {/* Magnifier icon */}
+              <svg
+                viewBox="0 0 20 20"
+                fill="none"
+                style={{
+                  position: "absolute", left: 10, top: "50%",
+                  transform: "translateY(-50%)",
+                  width: 16, height: 16, pointerEvents: "none",
+                  color: C.navy,
+                }}
+                aria-hidden
+              >
+                <circle cx="8.5" cy="8.5" r="5.5" stroke={C.navy} strokeWidth="1.5" />
+                <path d="M13 13l3.5 3.5" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <input
+                value={folderSearch}
+                onChange={(e) => setFolderSearch(e.target.value)}
+                placeholder="Search volumes in this folder…"
+                style={{
+                  width: "100%",
+                  padding: "9px 12px 9px 34px",
+                  fontFamily: fontSerif,
+                  fontSize: 13,
+                  fontStyle: "italic",
+                  color: C.navy,
+                  background: "#fff",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 4,
+                  outline: "none",
+                  boxSizing: "border-box",
+                  transition: "border-color 150ms, box-shadow 150ms",
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = C.gold;
+                  e.currentTarget.style.boxShadow  = "0 0 0 3px rgba(201,124,42,0.10)";
+                  e.currentTarget.style.fontStyle   = "normal";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = C.border;
+                  e.currentTarget.style.boxShadow   = "none";
+                  e.currentTarget.style.fontStyle    = "italic";
+                }}
+              />
             </div>
-            {admin && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => deleteFileMutation.mutate(file.id)}
-                  className="rounded px-1 text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
-                  title={folderLocked ? "Folder is locked" : "Delete file"}
-                  disabled={folderLocked}
-                >
-                  🗑
-                </button>
+
+            {/* Inline search results */}
+            {folderSearchQuery.data && (
+              <div style={{
+                marginTop: 8,
+                border: `1px solid ${C.border}`,
+                borderRadius: 4,
+                overflow: "hidden",
+                maxWidth: 640,
+                background: "#fff",
+              }}>
+                {folderSearchQuery.data.length === 0 ? (
+                  <p style={{ fontFamily: fontSerif, fontSize: 12, color: C.muted, padding: "10px 14px" }}>
+                    No matching files.
+                  </p>
+                ) : (
+                  <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                    {folderSearchQuery.data.map((item) => (
+                      <FolderSearchItem
+                        key={item.id}
+                        item={item}
+                        keyword={debouncedFolderSearch}
+                        returnTo={encodeURIComponent(searchContextHref)}
+                      />
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
-          </li>
-        ))}
-        {!orderedFiles.length && <li className="text-xs text-slate-500">No files in this folder yet.</li>}
-      </ul>
+          </div>
 
-      <DocumentChatWidget folderId={folderId} />
-    </section>
+          {/* ─────────────── Change 2 — Slim upload drop zone ─────────────── */}
+          {admin && (
+            <div style={{ marginTop: 24 }}>
+              <SlimDropZone
+                locked={uploadBlockedForUser}
+                fileInputRef={fileInputRef}
+                uploadPhase={uploadUi.phase}
+                uploadPercent={uploadUi.percent}
+                uploadIndeterminate={uploadUi.indeterminate}
+                uploadFileCount={uploadUi.fileCount}
+                onFilePick={onFilePick}
+                onUploadFiles={(files) => uploadMutation.mutate(files)}
+              />
+            </div>
+          )}
+
+          {/* ─────────────── Change 5 — Sort + view controls ─────────────── */}
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "flex-end",
+            gap: 16, marginTop: 24, marginBottom: 20,
+          }}>
+            {/* Sort dropdown */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontFamily: fontSerif, fontSize: 12, color: C.muted }}>
+                Sort by:
+              </span>
+              <select
+                value={fileSortField ?? "default"}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "default") { setFileSortField(null); return; }
+                  toggleFileSort(v as FileSortField);
+                }}
+                style={{
+                  fontFamily: fontSerif, fontSize: 12,
+                  color: C.navy, background: "#fff",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3, padding: "4px 8px",
+                  cursor: "pointer", outline: "none",
+                  appearance: "none",
+                  paddingRight: 24,
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236a5a40' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`,
+                  backgroundRepeat: "no-repeat",
+                  backgroundPosition: "right 7px center",
+                  backgroundSize: 10,
+                }}
+              >
+                <option value="default">Default</option>
+                <option value="filename">Title {fileSortField === "filename" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}</option>
+                <option value="number">Number {fileSortField === "number" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}</option>
+                <option value="createdAt">Date added {fileSortField === "createdAt" ? (fileSortDirection === "desc" ? "↓" : "↑") : ""}</option>
+              </select>
+            </div>
+
+            {/* View toggle */}
+            <div style={{ display: "flex", gap: 4 }}>
+              {/* Bookshelf icon */}
+              <button
+                type="button"
+                title="Bookshelf view"
+                onClick={() => setViewMode("bookshelf")}
+                style={{
+                  width: 28, height: 28, padding: 0, border: "none",
+                  borderRadius: 3, cursor: "pointer",
+                  background: viewMode === "bookshelf" ? C.navy : "transparent",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "background 150ms",
+                }}
+                aria-pressed={viewMode === "bookshelf"}
+              >
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none">
+                  <rect x="2" y="13" width="4" height="5" rx="0.5"
+                    fill={viewMode === "bookshelf" ? "#fff" : C.muted} />
+                  <rect x="8" y="10" width="4" height="8" rx="0.5"
+                    fill={viewMode === "bookshelf" ? "#fff" : C.muted} />
+                  <rect x="14" y="7" width="4" height="11" rx="0.5"
+                    fill={viewMode === "bookshelf" ? "#fff" : C.muted} />
+                </svg>
+              </button>
+              {/* List icon */}
+              <button
+                type="button"
+                title="List view"
+                onClick={() => setViewMode("list")}
+                style={{
+                  width: 28, height: 28, padding: 0, border: "none",
+                  borderRadius: 3, cursor: "pointer",
+                  background: viewMode === "list" ? C.navy : "transparent",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "background 150ms",
+                }}
+                aria-pressed={viewMode === "list"}>
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none">
+                  <rect x="2"  y="4"  width="16" height="2" rx="1" fill={viewMode === "list" ? "#fff" : C.muted} />
+                  <rect x="2"  y="9"  width="16" height="2" rx="1" fill={viewMode === "list" ? "#fff" : C.muted} />
+                  <rect x="2"  y="14" width="16" height="2" rx="1" fill={viewMode === "list" ? "#fff" : C.muted} />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* ─────────────── Change 3 — Bookshelf / List view ─────────────── */}
+          {viewMode === "bookshelf" ? (
+            <BookshelfView
+              files={visibleFiles}
+              isAdmin={admin}
+              folderLocked={folderLocked}
+              searchQuery={folderSearch}
+              onDelete={(id) => deleteFileMutation.mutate(id)}
+            />
+          ) : (
+            <ListView
+              files={visibleFiles}
+              searchQuery={folderSearch}
+              isAdmin={admin}
+              folderLocked={folderLocked}
+              onDelete={(id) => deleteFileMutation.mutate(id)}
+            />
+          )}
+
+        </div>
+
+        {/* Chat widget */}
+        <DocumentChatWidget folderId={folderId} contextLabel={folder.foldername} />
+      </section>
+    </>
   );
 }
 
-function uploadFileCountLabel(count: number): string {
-  if (count <= 0) {
-    return "";
-  }
-  return count === 1 ? "1 file" : `${count} files`;
-}
+// ─── SlimDropZone ─────────────────────────────────────────────────────────────
 
-function collectPdfFiles(source: FileList | File[] | null | undefined): File[] {
-  if (!source) {
-    return [];
-  }
-  return Array.from(source).filter(
-    (file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
-  );
-}
-
-function PdfUploadDropZone({
+function SlimDropZone({
   locked,
   fileInputRef,
   uploadPhase,
@@ -479,239 +586,247 @@ function PdfUploadDropZone({
 
   if (locked) {
     return (
-      <div
-        className="ui-card-soft flex min-h-[52px] flex-col items-center justify-center border-2 border-dashed border-slate-200 px-4 py-2.5 text-center"
-        aria-live="polite"
-      >
-        <p className="max-w-md text-xs text-slate-600 sm:text-sm">
-          This folder is locked. Unlock it from the library home to upload PDFs.
-        </p>
+      <div style={{
+        height: 52,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        border: `1px dashed ${C.border}`,
+        borderRadius: 4,
+        fontFamily: fontSerif, fontSize: 13, fontStyle: "italic", color: C.muted,
+      }}>
+        Folder is locked — unlock it from the library to upload volumes.
       </div>
     );
   }
 
+  // Progress / result states
+  if (uploadPhase === "uploading") {
+    return (
+      <div style={{
+        height: 52, border: `1px dashed ${C.border}`, borderRadius: 4,
+        display: "flex", alignItems: "center", gap: 12, padding: "0 16px",
+      }}>
+        <div style={{ flex: 1, height: 4, background: "#e8e0d0", borderRadius: 2, overflow: "hidden" }}>
+          {uploadIndeterminate ? (
+            <div style={{
+              height: "100%", width: "38%", background: C.gold, borderRadius: 2,
+              animation: "slimBarSlide 1.15s ease-in-out infinite",
+            }} />
+          ) : (
+            <div style={{
+              height: "100%", background: C.gold, borderRadius: 2,
+              width: `${Math.max(2, uploadPercent)}%`,
+              transition: "width 200ms ease",
+            }} />
+          )}
+        </div>
+        <span style={{ fontFamily: fontSerif, fontSize: 12, color: C.muted, whiteSpace: "nowrap" }}>
+          {uploadFileCount > 0 ? `Uploading ${uploadFileCountLabel(uploadFileCount)}` : "Uploading…"}
+          {!uploadIndeterminate && uploadPercent > 0 ? ` · ${uploadPercent}%` : ""}
+        </span>
+      </div>
+    );
+  }
+
+  if (uploadPhase === "done") {
+    return (
+      <div style={{
+        height: 52, border: `1px solid rgba(22,163,74,0.4)`,
+        background: "rgba(22,163,74,0.04)",
+        borderRadius: 4,
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        fontFamily: fontSerif, fontSize: 13, color: "#15803d",
+      }}>
+        <span style={{
+          display: "inline-flex", width: 18, height: 18, borderRadius: "50%",
+          background: "#16a34a", color: "#fff",
+          alignItems: "center", justifyContent: "center", fontSize: 11,
+        }}>✓</span>
+        Upload complete
+        {uploadFileCount > 0 && ` · ${uploadFileCountLabel(uploadFileCount)}`}
+      </div>
+    );
+  }
+
+  if (uploadPhase === "error") {
+    return (
+      <div style={{
+        height: 52, border: `1px solid rgba(220,38,38,0.3)`,
+        background: "rgba(220,38,38,0.03)",
+        borderRadius: 4,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontFamily: fontSerif, fontSize: 13, color: "#b91c1c",
+      }}>
+        Upload failed. Please try again.
+      </div>
+    );
+  }
+
+  // Idle state
   return (
     <div
-      className={[
-        "ui-card flex flex-col border-2 border-dashed px-3 py-2.5 text-center transition sm:px-4",
-        active ? "border-sky-400 bg-sky-50/50 ring-2 ring-sky-200/60" : "border-slate-300/90 bg-white/95",
-        isUploading ? "pointer-events-none opacity-95" : "",
-      ].join(" ")}
-      onDragEnter={(event) => {
-        if (isUploading) return;
-        event.preventDefault();
-        event.stopPropagation();
-        setActive(true);
+      style={{
+        height: 52,
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        border: `1px dashed ${active ? C.gold : C.border}`,
+        borderRadius: 4,
+        background: active ? "rgba(201,124,42,0.04)" : "transparent",
+        transform: active ? "scale(1.01)" : "scale(1)",
+        transition: "border-color 150ms, background 150ms, transform 150ms",
+        cursor: "pointer",
       }}
-      onDragOver={(event) => {
-        if (isUploading) return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEffect = "copy";
+      onDragEnter={(e) => { if (isUploading) return; e.preventDefault(); e.stopPropagation(); setActive(true); }}
+      onDragOver={(e)  => { if (isUploading) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "copy"; }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setActive(false);
       }}
-      onDragLeave={(event) => {
-        event.preventDefault();
-        const next = event.relatedTarget as Node | null;
-        if (!event.currentTarget.contains(next)) {
-          setActive(false);
-        }
-      }}
-      onDrop={(event) => {
+      onDrop={(e) => {
         if (isUploading) return;
-        event.preventDefault();
-        event.stopPropagation();
+        e.preventDefault(); e.stopPropagation();
         setActive(false);
-        const files = collectPdfFiles(event.dataTransfer.files);
-        if (files.length) {
-          onUploadFiles(files);
-        }
+        const files = collectPdfFiles(e.dataTransfer.files);
+        if (files.length) onUploadFiles(files);
       }}
+      onClick={() => fileInputRef.current?.click()}
     >
-      <div className="flex min-h-[4.5rem] flex-col items-stretch justify-center gap-2 sm:min-h-[4.25rem] sm:flex-row sm:items-center sm:gap-3 sm:text-left">
-        <div
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-xl border border-slate-200 bg-slate-50 text-lg text-sky-500 sm:self-auto sm:text-xl"
-          aria-hidden
-        >
-          📄
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-slate-800">Upload PDF files</p>
-          <p className="mt-0.5 max-w-xl text-[11px] leading-snug text-slate-600 sm:text-xs">
-            Drag and drop PDFs here or choose files. Multiple files allowed.
-          </p>
-        </div>
+      <span style={{ fontSize: 15, lineHeight: 1 }}>📄</span>
+      <span style={{ fontFamily: fontSerif, fontSize: 13, fontStyle: "italic", color: C.muted }}>
+        {active
+          ? "Release to add this volume"
+          : "Drop a PDF here to add a new volume  ·  or "}
+      </span>
+      {!active && (
         <button
           type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
-          className="ui-btn-primary mt-1 inline-flex w-full shrink-0 gap-2 py-2 text-xs sm:mt-0 sm:w-auto sm:py-2 sm:text-sm"
+          onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+          style={{
+            fontFamily: fontSerif, fontSize: 13, color: C.gold,
+            background: "none", border: "none", padding: 0, cursor: "pointer",
+            textDecoration: "none",
+            transition: "text-decoration 120ms",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+          onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
         >
-          <svg
-            className="h-4 w-4 shrink-0"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="17 8 12 3 7 8" />
-            <line x1="12" y1="3" x2="12" y2="15" />
-          </svg>
-          Choose files
+          Browse files
         </button>
-      </div>
-
-      <div className="mt-3 w-full max-w-md px-0.5" aria-live="polite">
-        {uploadPhase === "uploading" && (
-          <div className="space-y-2 text-left">
-            <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
-              {uploadIndeterminate ? (
-                <div className="pdf-upload-indeterminate-bar h-full w-[38%] rounded-full bg-sky-500" />
-              ) : (
-                <div
-                  className="h-full rounded-full bg-sky-500 transition-[width] duration-200 ease-out"
-                  style={{ width: `${Math.max(2, uploadPercent)}%` }}
-                />
-              )}
-            </div>
-            <p className="text-center text-xs font-medium text-slate-600">
-              {uploadFileCount > 0
-                ? `Uploading ${uploadFileCountLabel(uploadFileCount)}${uploadIndeterminate ? "…" : ""}`
-                : "Uploading…"}
-              {!uploadIndeterminate && uploadPercent > 0 ? ` · ${uploadPercent}%` : ""}
-            </p>
-          </div>
-        )}
-        {uploadPhase === "done" && (
-          <div className="flex flex-col items-center justify-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 py-2.5 text-sm font-medium text-emerald-800">
-            <div className="flex items-center justify-center gap-2">
-              <span
-                className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-xs text-white"
-                aria-hidden
-              >
-                ✓
-              </span>
-              Upload complete
-            </div>
-            {uploadFileCount > 0 && (
-              <p className="text-xs font-normal text-emerald-700/90">
-                {uploadFileCountLabel(uploadFileCount)} uploaded
-              </p>
-            )}
-          </div>
-        )}
-        {uploadPhase === "error" && (
-          <p className="rounded-xl border border-red-200 bg-red-50 py-2.5 text-center text-sm text-red-700">
-            {uploadFileCount > 0
-              ? `Upload failed (${uploadFileCountLabel(uploadFileCount)}). Please try again.`
-              : "Upload failed. Please try again."}
-          </p>
-        )}
-      </div>
+      )}
 
       <input
         ref={fileInputRef}
         type="file"
         accept="application/pdf,.pdf"
         multiple
-        className="hidden"
+        style={{ display: "none" }}
         onChange={onFilePick}
         disabled={isUploading}
       />
-      <style jsx>{`
-        @keyframes pdf-upload-indeterminate-slide {
-          0% {
-            transform: translateX(-100%);
-          }
-          100% {
-            transform: translateX(350%);
-          }
-        }
-        .pdf-upload-indeterminate-bar {
-          animation: pdf-upload-indeterminate-slide 1.15s ease-in-out infinite;
-        }
-      `}</style>
     </div>
   );
 }
 
-function compareVersionLikeFilename(leftFilename: string, rightFilename: string): number {
-  const leftTokens = extractLeadingNumberTokens(leftFilename);
-  const rightTokens = extractLeadingNumberTokens(rightFilename);
-  const maxLength = Math.max(leftTokens.length, rightTokens.length);
+// ─── Utility functions ────────────────────────────────────────────────────────
 
-  for (let index = 0; index < maxLength; index += 1) {
-    const leftPart = leftTokens[index];
-    const rightPart = rightTokens[index];
+function uploadFileCountLabel(count: number): string {
+  if (count <= 0) return "";
+  return count === 1 ? "1 file" : `${count} files`;
+}
 
-    if (leftPart === undefined && rightPart === undefined) {
-      break;
-    }
-    if (leftPart === undefined) {
-      return -1;
-    }
-    if (rightPart === undefined) {
-      return 1;
-    }
-    if (leftPart !== rightPart) {
-      return leftPart - rightPart;
-    }
+function collectPdfFiles(source: FileList | File[] | null | undefined): File[] {
+  if (!source) return [];
+  return Array.from(source).filter(
+    (f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")
+  );
+}
+
+function compareVersionLikeFilename(a: string, b: string): number {
+  const aT = extractLeadingNumberTokens(a);
+  const bT = extractLeadingNumberTokens(b);
+  const max = Math.max(aT.length, bT.length);
+  for (let i = 0; i < max; i++) {
+    const l = aT[i], r = bT[i];
+    if (l === undefined && r === undefined) break;
+    if (l === undefined) return -1;
+    if (r === undefined) return 1;
+    if (l !== r) return l - r;
   }
-
-  return leftFilename.localeCompare(rightFilename, "en", { numeric: true, sensitivity: "base" });
+  return a.localeCompare(b, "en", { numeric: true, sensitivity: "base" });
 }
 
 function extractLeadingNumberTokens(filename: string): number[] {
-  const matched = filename.trim().match(/^\d+(?:\.\d+)*/)?.[0];
-  if (!matched) {
-    return [];
-  }
-  return matched
-    .split(".")
-    .map((part) => Number(part))
-    .filter((part) => Number.isFinite(part));
+  const m = filename.trim().match(/^\d+(?:\.\d+)*/)?.[0];
+  if (!m) return [];
+  return m.split(".").map(Number).filter((n) => Number.isFinite(n));
 }
+
+// ─── FolderSearchItem (unchanged logic, restyled) ─────────────────────────────
 
 function FolderSearchItem({ item, keyword, returnTo }: { item: FileVersionItem; keyword: string; returnTo: string }) {
   const [pageChunk, setPageChunk] = useState(0);
   const pageEntries = Array.from(
     new Map(
-      (item.content ?? []).map((entry) => [
-        Math.max(1, entry.page + 1),
-        {
-          page: Math.max(1, entry.page + 1),
-          snippet: extractSentencePreview(entry.content, keyword),
-        },
+      (item.content ?? []).map((e) => [
+        Math.max(1, e.page + 1),
+        { page: Math.max(1, e.page + 1), snippet: extractSentencePreview(e.content, keyword) },
       ])
     ).values()
   ).sort((a, b) => a.page - b.page);
 
-  const totalChunks = Math.max(1, Math.ceil(pageEntries.length / PAGE_CHUNK_SIZE));
-  const pageStart = pageChunk * PAGE_CHUNK_SIZE;
-  const pagedEntries = pageEntries.slice(pageStart, pageStart + PAGE_CHUNK_SIZE);
+  const totalChunks  = Math.max(1, Math.ceil(pageEntries.length / PAGE_CHUNK_SIZE));
+  const pagedEntries = pageEntries.slice(pageChunk * PAGE_CHUNK_SIZE, (pageChunk + 1) * PAGE_CHUNK_SIZE);
 
   return (
-    <li className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-      <Link href={`/files/${item.id}`} className="break-keep break-words text-base font-semibold text-slate-900 hover:underline sm:text-lg">
+    <li style={{
+      padding: "12px 14px",
+      borderBottom: `1px solid ${C.border}`,
+    }}>
+      <Link
+        href={`/files/${item.id}`}
+        style={{
+          fontFamily: fontSerif, fontSize: 15, fontWeight: 600,
+          color: C.navy, textDecoration: "none",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+        onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+      >
         {item.filename}
       </Link>
       {pagedEntries.length > 0 && (
-        <div className="mt-2 space-y-2">
-          <ul className="space-y-1 text-xs">
+        <div style={{ marginTop: 8 }}>
+          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
             {pagedEntries.map((entry) => (
               <li key={`${item.id}-${entry.page}`}>
                 <Link
                   href={`/files/${item.id}?page=${entry.page}&keyword=${encodeURIComponent(keyword)}&returnTo=${returnTo}`}
-                  className="block rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm"
+                  style={{
+                    display: "block",
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 3,
+                    padding: "8px 10px",
+                    textDecoration: "none",
+                    transition: "border-color 120ms, box-shadow 120ms",
+                  }}
+                  onMouseEnter={(e) => {
+                    const el = e.currentTarget as HTMLAnchorElement;
+                    el.style.borderColor = C.gold;
+                    el.style.boxShadow   = "0 2px 8px rgba(201,124,42,0.10)";
+                  }}
+                  onMouseLeave={(e) => {
+                    const el = e.currentTarget as HTMLAnchorElement;
+                    el.style.borderColor = C.border;
+                    el.style.boxShadow   = "none";
+                  }}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-slate-800 sm:text-base">Page {entry.page}</span>
-                    <span className="text-[11px] text-slate-500">Open</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontFamily: fontSerif, fontSize: 13, fontWeight: 600, color: C.navy }}>
+                      Page {entry.page}
+                    </span>
+                    <span style={{ fontFamily: fontSerif, fontSize: 11, color: C.muted }}>Open →</span>
                   </div>
-                  <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-700 sm:text-sm">
+                  <p style={{
+                    fontFamily: fontSerif, fontSize: 12, color: C.textMid,
+                    lineHeight: 1.6, margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                  }}>
                     {highlightKeyword(entry.snippet, keyword)}
                   </p>
                 </Link>
@@ -719,23 +834,33 @@ function FolderSearchItem({ item, keyword, returnTo }: { item: FileVersionItem; 
             ))}
           </ul>
           {pageEntries.length > PAGE_CHUNK_SIZE && (
-            <div className="flex items-center gap-2 text-xs">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
               <button
-                onClick={() => setPageChunk((prev) => Math.max(0, prev - 1))}
+                type="button"
+                onClick={() => setPageChunk((p) => Math.max(0, p - 1))}
                 disabled={pageChunk === 0}
-                className="rounded border border-slate-300 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+                style={{
+                  fontFamily: fontSerif, fontSize: 12, color: C.navy,
+                  border: `1px solid ${C.border}`, borderRadius: 3,
+                  padding: "3px 8px", cursor: "pointer", background: "#fff",
+                }}
               >
-                Prev
+                ← Prev
               </button>
-              <span className="text-slate-500">
+              <span style={{ fontFamily: fontSerif, fontSize: 12, color: C.muted }}>
                 {pageChunk + 1} / {totalChunks}
               </span>
               <button
-                onClick={() => setPageChunk((prev) => Math.min(totalChunks - 1, prev + 1))}
+                type="button"
+                onClick={() => setPageChunk((p) => Math.min(totalChunks - 1, p + 1))}
                 disabled={pageChunk >= totalChunks - 1}
-                className="rounded border border-slate-300 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+                style={{
+                  fontFamily: fontSerif, fontSize: 12, color: C.navy,
+                  border: `1px solid ${C.border}`, borderRadius: 3,
+                  padding: "3px 8px", cursor: "pointer", background: "#fff",
+                }}
               >
-                Next
+                Next →
               </button>
             </div>
           )}
@@ -746,49 +871,32 @@ function FolderSearchItem({ item, keyword, returnTo }: { item: FileVersionItem; 
 }
 
 function highlightKeyword(text: string, keyword: string): ReactNode {
-  const trimmedKeyword = keyword.trim();
-  if (!trimmedKeyword) {
-    return text;
-  }
-
-  const escapedKeyword = trimmedKeyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`(${escapedKeyword})`, "gi");
-  const segments = text.split(regex);
-
-  return segments.map((segment, index) =>
-    segment.toLowerCase() === trimmedKeyword.toLowerCase() ? (
-      <mark key={`${segment}-${index}`} className="rounded bg-amber-200 px-0.5">
-        {segment}
+  const k = keyword.trim();
+  if (!k) return text;
+  const esc  = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const segs = text.split(new RegExp(`(${esc})`, "gi"));
+  return segs.map((seg, i) =>
+    seg.toLowerCase() === k.toLowerCase() ? (
+      <mark key={i} style={{ background: "rgba(201,124,42,0.22)", borderRadius: 2, padding: "0 1px" }}>
+        {seg}
       </mark>
     ) : (
-      <Fragment key={`${segment}-${index}`}>{segment}</Fragment>
+      <Fragment key={i}>{seg}</Fragment>
     )
   );
 }
 
 function extractSentencePreview(content: string, keyword: string): string {
-  const normalized = normalizePreviewText(content);
-  if (!normalized) {
-    return "...";
-  }
-  const lowerKeyword = keyword.trim().toLowerCase();
-  const maxLength = 220;
-  const contextRadius = 110;
-
-  if (!lowerKeyword) {
-    return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
-  }
-
-  const matchIndex = normalized.toLowerCase().indexOf(lowerKeyword);
-  if (matchIndex < 0) {
-    return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
-  }
-
-  const start = Math.max(0, matchIndex - contextRadius);
-  const end = Math.min(normalized.length, matchIndex + lowerKeyword.length + contextRadius);
-  const prefix = start > 0 ? "..." : "";
-  const suffix = end < normalized.length ? "..." : "";
-  return `${prefix}${normalized.slice(start, end)}${suffix}`;
+  const n = normalizePreviewText(content);
+  if (!n) return "...";
+  const lk = keyword.trim().toLowerCase();
+  const maxLength = 220, contextRadius = 110;
+  if (!lk) return n.length > maxLength ? `${n.slice(0, maxLength)}...` : n;
+  const idx = n.toLowerCase().indexOf(lk);
+  if (idx < 0) return n.length > maxLength ? `${n.slice(0, maxLength)}...` : n;
+  const start  = Math.max(0, idx - contextRadius);
+  const end    = Math.min(n.length, idx + lk.length + contextRadius);
+  return `${start > 0 ? "..." : ""}${n.slice(start, end)}${end < n.length ? "..." : ""}`;
 }
 
 function normalizePreviewText(content: string): string {

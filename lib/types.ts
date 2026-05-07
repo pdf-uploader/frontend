@@ -32,6 +32,8 @@ export interface Folder {
   id: string;
   foldername: string;
   lock?: boolean;
+  /** Shelf spine color (hex). Set on create; persisted when the API supports it. */
+  spineColor?: string;
   createdAt?: string;
   updatedAt?: string;
   /** Server sort index (lowest first). */

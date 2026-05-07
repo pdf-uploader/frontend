@@ -1,29 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import BookHomepage from "@/components/BookHomepage";
-import { ArrowRightIcon } from "@/components/imme/imme-icons";
+import { BrandedBottomConsultants } from "@/components/branded-logos-shell";
+import { FolderBrowser } from "@/components/folder-browser";
+import { hasAuthSession } from "@/lib/auth-session";
 import { useAuth } from "@/lib/hooks/use-auth";
-import { IMME_CURRENT_STEP, IMME_KEY_FACTS, IMME_NEWS } from "@/lib/imme/project";
 
 export default function HomePage() {
   const router = useRouter();
   const auth = useAuth();
   const [isHydrated, setIsHydrated] = useState(false);
-  const isLoggedIn = Boolean(auth.token);
-  const featured = IMME_NEWS[0];
-
-  useEffect(() => {
-    setIsHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    setIsHydrated(true);
-  }, []);
-
   const isLoggedIn = hasAuthSession(auth);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   if (!isHydrated || !isLoggedIn) {
     return <BookHomepage onLoginClick={() => router.push("/login")} />;

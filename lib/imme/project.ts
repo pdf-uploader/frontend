@@ -8,7 +8,7 @@
  */
 
 export const IMME_PROJECT = {
-  shortName: "IMME Project",
+  shortName: "Expressway Integrated Manual",
   longName:
     "The Project for Establishment of Integrated Manuals and Main Facility Management System of Expressways in Uganda",
   tagline:
@@ -244,7 +244,6 @@ export const IMME_NAV: ReadonlyArray<{
   { label: "Progress", href: "/progress" },
   { label: "Capacity Building", href: "/capacity-building" },
   { label: "News", href: "/news" },
-  { label: "Contact", href: "/contact" },
 ];
 
 /** KEE pilot bridges (BMS §5.4). Numbers and IDs are placeholders pending field data. */
@@ -295,7 +294,13 @@ export const IMME_NEWS: ReadonlyArray<{
   },
 ];
 
-/** Identifying contact endpoints for the Contact page (placeholders — wire to CMS later). */
+/** Team contacts shown in the site header (hover) and footer. */
+export const IMME_TEAM_EMAILS = {
+  developer: { role: "Developer", email: "kjuho2021@gmail.com" },
+  projectManager: { role: "Project manager", email: "kisong3007@kecbd.com" },
+} as const;
+
+/** Identifying contact endpoints (legacy placeholders for institutional touchpoints — prefer IMME_TEAM_EMAILS for UI). */
 export const IMME_CONTACTS = {
   pmc: {
     label: "Project Management Consultant",

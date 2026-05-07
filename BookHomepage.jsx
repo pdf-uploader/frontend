@@ -110,9 +110,15 @@ const fontDisplay = "'Playfair Display', 'Times New Roman', serif";
 // ─── Timing constants ─────────────────────────────────────────────────────────
 
 const LAST_SPREAD = SECTIONS.length + 1; // 0=toc+welcome, 1–5=sections, 6=login
-const OPEN_MS     = 1000; // book-opening animation (slide + flip two phases)
-const CLOSE_MS    = 900;  // book-closing animation (fade + slide)
-const FLIP_MS     = 880;  // page-flip (2× slower as requested)
+/** Open / close transitions: crossfade between one-page cover portrait and full spread — no hinge flips. */
+const OPEN_MS   = 560;
+const CLOSE_MS  = 780;
+const CLOSE_HOME_MS = 780;
+const FLIP_MS            = 880;  // in-spread page turns only
+
+/** Same page height as closed cover; spread width ≈ two cover halves + spine (no growth to a separate “wide” aspect) */
+const BOOK_PAGE_H   = 'min(86vh, 680px)';
+const BOOK_SPREAD_W = 'min(96vw, 962px)';
 
 // ─── Content components ───────────────────────────────────────────────────────
 
@@ -199,7 +205,17 @@ function SectionRightContent({ section }) {
 
 function LoginLeftContent({ onLoginClick }) {
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 20 }}>
+    /* height:'100%' + minHeight:0 + boxSizing ensure this container fills the
+       pageInner flex column fully, so justify-content:center is computed relative
+       to the full page height — not just the content height. This prevents the
+       "Ready to dive deeper" block from first painting at the top and then
+       jumping to center when the layout settles after the flip animation. */
+    <div style={{
+      flex: 1, display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      textAlign: 'center', padding: 20,
+      height: '100%', minHeight: 0, boxSizing: 'border-box',
+    }}>
       <div style={{ fontSize: 36, marginBottom: 14, opacity: 0.6 }}>🔐</div>
       <div style={{ fontFamily: fontDisplay, fontSize: 18, fontWeight: 700, color: C.navy, marginBottom: 8 }}>Ready to dive deeper?</div>
       <div style={{ fontFamily: fontSerif, fontSize: 13, color: C.textMid, lineHeight: 1.6, marginBottom: 20 }}>
@@ -244,13 +260,37 @@ const styles = {
     color: C.textMuted, paddingBottom: 10, borderBottom: `0.5px solid ${C.paperBorder}`, marginBottom: 24,
   },
   tocEntry: { display: 'flex', alignItems: 'flex-start', padding: '10px 0', borderBottom: `0.5px solid #e8e0d0`, gap: 12 },
-  page: { flex: 1, background: C.paper, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' },
+  page: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+    alignSelf: 'stretch',
+    background: C.paper,
+    display: 'flex',
+    flexDirection: 'column',
+    position: 'relative',
+    overflow: 'hidden',
+  },
   pageTexture: {
     position: 'absolute', inset: 0, pointerEvents: 'none',
     backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 24px,rgba(180,160,120,0.07) 24px,rgba(180,160,120,0.07) 25px)',
     borderRadius: 'inherit',
   },
-  pageInner: { padding: '32px 28px', flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 1 },
+  /* minHeight: 0 is critical — without it a flex child grows to content size,
+     so justify-content:center has nothing to center within. With minHeight:0
+     + flex:1 the child fills the parent's actual height and centering works
+     correctly from the very first paint (no jump after animation). */
+  pageInner: {
+    padding: '32px 28px',
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    position: 'relative',
+    zIndex: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    WebkitOverflowScrolling: 'touch',
+  },
   pageFooter: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 28px', borderTop: `0.5px solid ${C.paperBorder}`, position: 'relative', zIndex: 1 },
 };
 
@@ -333,7 +373,7 @@ function BookCover({ onClick, tiltEnabled = true }) {
   return (
     /* Outer: perspective container + click target */
     <div
-      style={{ perspective: 2000, width: 'min(88vw,480px)', height: 'min(86vh,680px)', cursor: 'pointer', position: 'relative', userSelect: 'none' }}
+      style={{ perspective: 2000, width: 'min(88vw,480px)', height: BOOK_PAGE_H, cursor: 'pointer', position: 'relative', userSelect: 'none' }}
       onClick={onClick}
       onMouseMove={onMouseMove}
       onMouseEnter={() => {
@@ -398,15 +438,26 @@ function SpreadShell({ children, style = {}, ...rest }) {
     <div
       style={{
         position: 'relative',
-        width: '100%',
-        maxWidth: 'min(96vw,1280px)',
-        minHeight: 'min(82vh,760px)',
+        width: BOOK_SPREAD_W,
+        height: BOOK_PAGE_H,
+        minHeight: BOOK_PAGE_H,
+        maxHeight: BOOK_PAGE_H,
         display: 'flex',
+        alignItems: 'stretch',
         borderRadius: 8,
         /* NO filter here — CSS filter flattens 3-D children (breaks preserve-3d) */
         boxShadow: '0 8px 36px rgba(0,0,0,0.20)',
         /* perspective so children can do 3-D rotateY */
         perspective: 1800,
+        perspectiveOrigin: '50% 50%',
+        boxSizing: 'border-box',
+        /*
+         * overflow: visible — clipping was cutting off rotated page corners during flips,
+         * which reads as unnatural. Outer scene padding + scrollbar-gutter contain layout.
+         */
+        overflow: 'visible',
+        /* Paper behind pages so transient gaps during slide/3-D never read as “blank sheets” */
+        background: C.paper,
         ...style,
       }}
       {...rest}
@@ -452,179 +503,131 @@ function Spine() {
 
 // ─── BookOpeningAnimation ─────────────────────────────────────────────────────
 /**
- * Physical book opening — two sequential phases:
- *
- * Phase 1 · SLIDE  (coverOpenSlide, 340 ms)
- *   The portrait cover starts centered in the viewport (translateX(-50%) on the
- *   right-half element) and slides to the right half of the spread, as if the
- *   reader is moving the book to the right to make room for the left page.
- *
- * Phase 2 · FLIP  (coverOpenFlip, remaining ms, delayed)
- *   The cover rotates 0 → -180° around the spine (left edge of the element),
- *   peeling right→left to reveal the TOC underneath.  The TOC page fades in
- *   during this phase.
+ * One portrait “page” dissolves away while the two-page spread fades and eases into place (no hinge flip).
  */
-function BookOpeningAnimation({ onDone, onLoginClick }) {
-  const OPEN_SLIDE_MS = 340;
-  const OPEN_FLIP_MS  = OPEN_MS - OPEN_SLIDE_MS;
-
+function BookOpeningAnimation({ onDone }) {
   useEffect(() => {
     const t = window.setTimeout(onDone, OPEN_MS + 40);
     return () => window.clearTimeout(t);
   }, [onDone]);
 
-  const faceBase = {
-    position: 'absolute', inset: 0,
-    backfaceVisibility: 'hidden',
-    overflow: 'hidden',
-  };
-
   return (
-    <SpreadShell>
-      {/* TOC page: always visible — no paper overlay covers it during slide */}
-      <PageLeft><TocLeftContent /></PageLeft>
-      <Spine />
-      {/* Welcome page: always visible, revealed as cover peels off */}
-      <PageRight><WelcomeRightContent /></PageRight>
-
-      {/* ── Cover: starts centered (portrait look), slides right, then flips open ── */}
-      {/*   Phase 1 — coverOpenSlide: translateX(-50%) → translateX(0)             */}
-      {/*   Phase 2 — coverOpenFlip:  rotateY(0) → rotateY(-180°) after delay      */}
+    <div style={{
+      position: 'relative', width: '100%', display: 'flex',
+      justifyContent: 'center', alignItems: 'center', minHeight: BOOK_PAGE_H,
+    }}>
       <div style={{
-        position: 'absolute', right: 0, top: 0, bottom: 0,
-        width: 'calc(50% - 1px)',
-        zIndex: 17,
-        transformOrigin: 'left center',   /* spine — correct pivot for the flip   */
-        transformStyle: 'preserve-3d',
-        animation: [
-          `coverOpenSlide ${OPEN_SLIDE_MS}ms cubic-bezier(0.22, 0, 0.36, 1) forwards`,
-          `coverOpenFlip  ${OPEN_FLIP_MS}ms cubic-bezier(0.4, 0, 0.25, 1) ${OPEN_SLIDE_MS}ms forwards`,
-        ].join(', '),
+        opacity: 0,
+        animation: `openingSpreadEnter ${OPEN_MS}ms cubic-bezier(0.25, 0, 0.2, 1) forwards`,
       }}>
-        {/* Front face: cover image (visible while cover faces the viewer) */}
-        <div style={{ ...faceBase, background: C.navy, borderRadius: '2px 8px 8px 2px' }}>
-          <img src="/logo/bookcover.png" alt="" aria-hidden
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }} />
-          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
-            background: 'linear-gradient(to left, rgba(0,0,0,0.18) 0%, transparent 28%)' }} />
-        </div>
-        {/* Back face: inside cover / endpaper (visible as cover folds to the left) */}
-        <div style={{ ...faceBase, background: '#f5f0e8', transform: 'rotateY(180deg)', borderRadius: '8px 0 0 8px' }}>
-          <div style={styles.pageTexture} />
-          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
-            background: 'linear-gradient(to right, rgba(0,0,0,0.08) 0%, transparent 30%)' }} />
-        </div>
+        <SpreadShell>
+          <PageLeft><TocLeftContent /></PageLeft>
+          <Spine />
+          <PageRight><WelcomeRightContent /></PageRight>
+        </SpreadShell>
       </div>
-    </SpreadShell>
+
+      <div style={{
+        position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 12,
+        width: 'min(88vw, 480px)', height: BOOK_PAGE_H,
+        borderRadius: '2px 10px 10px 2px',
+        opacity: 1,
+        overflow: 'hidden',
+        boxShadow: '-8px 14px 36px rgba(0,0,0,0.40), 2px 0 0 #f0ebe0, 4px 0 0 #e8e2d8',
+        animation: `openingCoverDismiss ${OPEN_MS}ms cubic-bezier(0.4, 0, 0.6, 1) forwards`,
+        pointerEvents: 'none',
+      }}>
+        <img src="/logo/bookcover.png" alt="" aria-hidden
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }} />
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
+          background: 'linear-gradient(to left, rgba(0,0,0,0.12) 0%, transparent 38%)' }} />
+      </div>
+    </div>
   );
 }
 
 // ─── BookClosingAnimation ─────────────────────────────────────────────────────
 /**
- * Physical book closing in two sequential phases:
- *
- * Phase 1 · FLIP  (leftPageCloseFlip, ~55 % of CLOSE_MS)
- *   The left page (showing current spread's left content) sweeps LEFT → RIGHT
- *   around the spine (transform-origin: right center, rotateY 0 → 180°).
- *   The back face carries the COVER IMAGE, so as the flip completes the reader
- *   sees the cover land on the right side of the spread.
- *   The right page fades out quickly so only the flip is in focus.
- *
- * Phase 2 · SLIDE  (remaining ~45 % of CLOSE_MS, after a delay)
- *   The SpreadShell fades out while a portrait-sized cover image slides in from
- *   the right and settles at center — as if the reader placed the closed book
- *   back in the middle of the table.
- *   onDone fires ≈ 40 ms later and the static BookCover appears seamlessly.
+ * Spread (two visible pages) eases away while the single portrait cover fades in — no hinge flip.
  */
 function BookClosingAnimation({ spread, onDone, onLoginClick }) {
-  const FLIP_DUR = Math.round(CLOSE_MS * 0.55); // phase 1: page flip
-
   useEffect(() => {
     const t = window.setTimeout(onDone, CLOSE_MS + 40);
     return () => window.clearTimeout(t);
   }, [onDone]);
 
-  const faceBase = { position: 'absolute', inset: 0, backfaceVisibility: 'hidden', overflow: 'hidden' };
-
   return (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-
-      {/* ── Spread shell fades out during the flip so no blank left area shows ── */}
-      <SpreadShell style={{ animation: `spreadFadeOut ${CLOSE_MS * 0.9}ms ease forwards` }}>
-
-        {/* Left placeholder — transparent, keeps flex layout; flip overlay renders actual content */}
-        <div style={{ flex: 1 }} />
+      <SpreadShell style={{ animation: `closingSpreadDissolve ${CLOSE_MS}ms cubic-bezier(0.3, 0, 0.25, 1) forwards` }}>
+        <PageLeft>{getSpreadContent(spread, 'left', onLoginClick)}</PageLeft>
         <Spine />
-        {/* Right page fades out quickly so attention stays on the flip */}
-        <PageRight style={{ animation: `spreadFadeOut ${FLIP_DUR * 0.45}ms ease forwards` }}>
-          {getSpreadContent(spread, 'right', onLoginClick)}
-        </PageRight>
-
-        {/* ── LEFT-PAGE FLIP: sweeps left → right, cover image on back face ── */}
-        <div style={{
-          position: 'absolute', left: 0, top: 0, bottom: 0,
-          width: 'calc(50% - 1px)',
-          borderRadius: '8px 0 0 8px',
-          zIndex: 20,
-          transformOrigin: 'right center',
-          transformStyle: 'preserve-3d',
-          animation: `leftPageCloseFlip ${FLIP_DUR}ms cubic-bezier(0.42, 0, 0.22, 1) forwards`,
-        }}>
-          {/* Front: left page content (visible 0 – 90°) */}
-          <div style={{ ...faceBase, background: C.paper, borderRadius: '8px 0 0 8px' }}>
-            <div style={styles.pageTexture} />
-            <div style={styles.pageInner}>{getSpreadContent(spread, 'left', onLoginClick)}</div>
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
-              background: 'linear-gradient(to right, rgba(0,0,0,0.10) 0%, transparent 22%)' }} />
-          </div>
-          {/* Back: cover image (visible 90 – 180°, landing on the right side) */}
-          <div style={{ ...faceBase, background: C.navy, transform: 'rotateY(-180deg)', borderRadius: '0 8px 8px 0' }}>
-            <img src="/logo/bookcover.png" alt="" aria-hidden
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }} />
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
-              background: 'linear-gradient(to left, rgba(0,0,0,0.10) 0%, transparent 30%)' }} />
-          </div>
-        </div>
-
+        <PageRight>{getSpreadContent(spread, 'right', onLoginClick)}</PageRight>
       </SpreadShell>
 
-      {/* ── Portrait cover slides in from right simultaneously with SpreadShell fade ── */}
       <div style={{
-        position: 'absolute', top: '50%', left: '50%',
-        transform: 'translate(-50%, -50%)',
-        zIndex: 25,
+        position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+        zIndex: 25, width: 'min(88vw, 480px)', height: BOOK_PAGE_H,
+        borderRadius: '2px 10px 10px 2px', overflow: 'hidden',
+        boxShadow: '-6px 12px 32px rgba(0,0,0,0.40)',
+        opacity: 0,
+        animation: `closingCoverReveal ${CLOSE_MS}ms cubic-bezier(0.28, 0, 0.2, 1) forwards`,
       }}>
-        <div style={{
-          width: 'min(88vw, 480px)', height: 'min(86vh, 680px)',
-          borderRadius: '2px 10px 10px 2px', overflow: 'hidden',
-          boxShadow: '-6px 12px 32px rgba(0,0,0,0.40)',
-          animation: `coverCloseSlide ${CLOSE_MS}ms cubic-bezier(0.28, 0, 0.18, 1) both`,
-        }}>
-          <img src="/logo/bookcover.png" alt="" aria-hidden
-            style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }} />
-        </div>
+        <img src="/logo/bookcover.png" alt="" aria-hidden
+          style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }} />
       </div>
-
     </div>
   );
 }
 
-// ─── Mobile cover animator (kept for mobile open/close) ───────────────────────
+// ─── BookClosingSpreadZero (first spread → closed cover) ──────────────────────
+/**
+ * Same dissolve as other closes: TOC + Welcome spread fades out, portrait cover fades in (no hinge flip).
+ */
+function BookClosingSpreadZero({ onDone }) {
+  useEffect(() => {
+    const t = window.setTimeout(onDone, CLOSE_HOME_MS + 40);
+    return () => window.clearTimeout(t);
+  }, [onDone]);
+
+  return (
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <SpreadShell style={{ animation: `closingSpreadDissolveHome ${CLOSE_HOME_MS}ms cubic-bezier(0.3, 0, 0.25, 1) forwards` }}>
+        <PageLeft><TocLeftContent /></PageLeft>
+        <Spine />
+        <PageRight><WelcomeRightContent /></PageRight>
+      </SpreadShell>
+
+      <div style={{
+        position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+        zIndex: 25, width: 'min(88vw, 480px)', height: BOOK_PAGE_H,
+        borderRadius: '2px 10px 10px 2px', overflow: 'hidden',
+        boxShadow: '-6px 12px 32px rgba(0,0,0,0.40)',
+        opacity: 0,
+        animation: `closingCoverRevealHome ${CLOSE_HOME_MS}ms cubic-bezier(0.28, 0, 0.2, 1) forwards`,
+      }}>
+        <img src="/logo/bookcover.png" alt="" aria-hidden
+          style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Mobile open/close: same dissolve style as desktop (no rotateY hinge) ──────────────────
+/** @deprecated Prefer BookOpeningAnimation / BookClosing* for parity; retained if ever re-wired */
 function AnimatingCover({ mode, onDone }) {
   useEffect(() => {
     const t = window.setTimeout(onDone, mode === 'opening' ? OPEN_MS : CLOSE_MS);
     return () => window.clearTimeout(t);
   }, [mode, onDone]);
   return (
-    <div style={{ perspective: 1800, width: 'min(88vw,480px)', height: 'min(86vh,680px)', flexShrink: 0 }}>
+    <div style={{ width: 'min(88vw,480px)', height: BOOK_PAGE_H, flexShrink: 0 }}>
       <div style={{
         width: '100%', height: '100%',
         borderRadius: '2px 10px 10px 2px',
         overflow: 'hidden', position: 'relative',
-        transformOrigin: 'left center',
         animation: mode === 'opening'
-          ? `bookCoverOpen ${OPEN_MS}ms cubic-bezier(0.45,0,0.25,1) forwards`
-          : `bookCoverClose ${CLOSE_MS}ms cubic-bezier(0.45,0,0.25,1) forwards`,
+          ? `mobileCoverOpenFade ${OPEN_MS}ms cubic-bezier(0.4, 0, 0.6, 1) forwards`
+          : `mobileCoverCloseFade ${CLOSE_MS}ms cubic-bezier(0.4, 0, 0.6, 1) forwards`,
         boxShadow: '-8px 14px 36px rgba(0,0,0,0.40), 2px 0 0 #f0ebe0, 4px 0 0 #e8e2d8',
       }}>
         <img src="/logo/bookcover.png" alt="" aria-hidden
@@ -674,9 +677,16 @@ function PageFlipOverlay({ direction, fromSpread, toSpread, onLoginClick }) {
     }}>
 
       {/* ── Front face: page being turned away ── */}
-      <div style={{ ...faceBase, background: C.paper, borderRadius: isForward ? '0 8px 8px 0' : '8px 0 0 8px' }}>
+      {/* Same column flex model as PageLeft/PageRight so flex:1 pageInner fills height (avoids centered login block jumping when flip ends). */}
+      <div style={{
+        ...faceBase,
+        background: C.paper,
+        borderRadius: isForward ? '0 8px 8px 0' : '8px 0 0 8px',
+        display: 'flex',
+        flexDirection: 'column',
+      }}>
         <div style={styles.pageTexture} />
-        <div style={styles.pageInner}>
+        <div style={{ ...styles.pageInner, flex: 1, minHeight: 0 }}>
           {getSpreadContent(fromSpread, isForward ? 'right' : 'left', onLoginClick)}
         </div>
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
@@ -691,9 +701,11 @@ function PageFlipOverlay({ direction, fromSpread, toSpread, onLoginClick }) {
         background: C.paper,
         transform: isForward ? 'rotateY(180deg)' : 'rotateY(-180deg)',
         borderRadius: isForward ? '8px 0 0 8px' : '0 8px 8px 0',
+        display: 'flex',
+        flexDirection: 'column',
       }}>
         <div style={styles.pageTexture} />
-        <div style={styles.pageInner}>
+        <div style={{ ...styles.pageInner, flex: 1, minHeight: 0 }}>
           {getSpreadContent(toSpread, isForward ? 'left' : 'right', onLoginClick)}
         </div>
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
@@ -715,10 +727,12 @@ function MobileFlipOverlay({ direction, fromPageIndex, onLoginClick }) {
     <div style={{
       position: 'absolute', inset: 0, zIndex: 20,
       background: C.paper, overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
       animation: `${isForward ? 'mobileFlipFwd' : 'mobileFlipBwd'} ${FLIP_MS}ms cubic-bezier(0.4, 0, 0.3, 1) forwards`,
     }}>
       <div style={styles.pageTexture} />
-      <div style={{ ...styles.pageInner, minHeight: 'min(74vh,680px)' }}>
+      <div style={{ ...styles.pageInner, flex: 1, minHeight: 'min(74vh,680px)' }}>
         {getMobilePage(fromPageIndex, onLoginClick)}
       </div>
     </div>
@@ -799,8 +813,6 @@ function OpenBook({
   const rightDisplaySpread = (isFlipping && flipDirection === 'backward') ? flipFromSpread : spread;
 
   return (
-    /* SpreadShell supplies perspective:1800 and boxShadow without CSS filter,  */
-    /* which is critical — filter would flatten all preserve-3d children.       */
     <SpreadShell style={{ position: 'relative' }} onMouseLeave={() => setHoverSide(null)}>
       {/* Left page */}
       <PageLeft cursor={leftCursor} onClick={() => { if (isFlipping) return; if (isFirstSpread) onClose(); else if (canGoBackward) onTurnBackward(); }}>
@@ -856,120 +868,6 @@ function OpenBook({
   );
 }
 
-// ─── ContactButton ────────────────────────────────────────────────────────────
-
-function ContactButton() {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <>
-      {/* Floating pill — bottom-right corner */}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          position: 'fixed',
-          bottom: 22,
-          right: 22,
-          zIndex: 200,
-          fontFamily: fontSerif,
-          fontSize: 12,
-          letterSpacing: '0.06em',
-          color: open ? '#fff' : C.textMid,
-          background: open ? C.navy : 'rgba(255,255,255,0.88)',
-          border: `1px solid ${open ? C.navy : C.paperBorder}`,
-          borderRadius: 999,
-          padding: '7px 16px',
-          cursor: 'pointer',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.14)',
-          backdropFilter: 'blur(8px)',
-          transition: 'background 180ms ease, color 180ms ease, border-color 180ms ease',
-          userSelect: 'none',
-        }}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-      >
-        Contact
-      </button>
-
-      {/* Popup card */}
-      {open && (
-        <>
-          {/* Backdrop — click anywhere to dismiss */}
-          <div
-            onClick={() => setOpen(false)}
-            style={{ position: 'fixed', inset: 0, zIndex: 198 }}
-            aria-hidden
-          />
-          <div
-            role="dialog"
-            aria-label="Contact information"
-            style={{
-              position: 'fixed',
-              bottom: 60,
-              right: 22,
-              zIndex: 199,
-              background: C.paper,
-              border: `1px solid ${C.paperBorder}`,
-              borderRadius: 10,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
-              padding: '20px 22px',
-              minWidth: 260,
-              fontFamily: fontSerif,
-            }}
-          >
-            <div style={{
-              fontFamily: fontDisplay,
-              fontSize: 13,
-              fontWeight: 700,
-              color: C.navy,
-              marginBottom: 14,
-              letterSpacing: '0.04em',
-            }}>
-              Contact
-            </div>
-
-            {[
-              { role: 'Developer', email: 'kjuho2021@gmail.com' },
-              { role: 'Project Manager', email: 'kisong3007@kecbd.com' },
-            ].map(({ role, email }) => (
-              <div key={role} style={{ marginBottom: 12 }}>
-                <div style={{
-                  fontSize: 9,
-                  letterSpacing: '0.18em',
-                  textTransform: 'uppercase',
-                  color: C.textMuted,
-                  marginBottom: 3,
-                }}>
-                  {role}
-                </div>
-                <a
-                  href={`mailto:${email}`}
-                  style={{
-                    fontSize: 13,
-                    color: C.navy,
-                    textDecoration: 'none',
-                    display: 'block',
-                    padding: '5px 8px',
-                    borderRadius: 5,
-                    background: 'rgba(26,39,68,0.04)',
-                    transition: 'background 150ms ease',
-                    wordBreak: 'break-all',
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = `rgba(201,124,42,0.10)`)}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = `rgba(26,39,68,0.04)`)}
-                >
-                  {email}
-                </a>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </>
-  );
-}
-
 // ─── Main exported component ──────────────────────────────────────────────────
 
 /**
@@ -977,19 +875,18 @@ function ContactButton() {
  *  CLOSED
  *    │  click cover
  *    ▼
- *  OPENING  (AnimatingCover plays bookCoverOpen, spread hidden)
+ *  OPENING  (BookOpeningAnimation: crossfade portrait cover → two-page spread)
  *    │  after OPEN_MS
  *    ▼
  *  OPEN
  *    │  click right half     │  click left half (spread=0) → CLOSING
  *    ▼                       ▼
- *  FLIPPING_FWD          CLOSING  (AnimatingCover plays bookCoverClose)
- *    │  after FLIP_MS          │  after CLOSE_MS
+ *  FLIPPING_FWD          CLOSING  (BookClosing*: crossfade spread → portrait cover)
+ *    │  after FLIP_MS          │  after CLOSE_MS / CLOSE_HOME_MS
  *    ▼                         ▼
  *  OPEN                     CLOSED
  *
- * Key principle: ONLY ONE of (cover | spread) is ever rendered at the same time,
- * except during OPENING/CLOSING where the AnimatingCover is shown solo (no spread).
+ * During OPENING/CLOSING, cover and spread are layered and opacity-animated (no hinge flip).
  */
 export default function BookHomepage({ onLoginClick }) {
   // 'CLOSED' | 'OPENING' | 'OPEN' | 'FLIPPING_FWD' | 'FLIPPING_BWD' | 'CLOSING'
@@ -1021,7 +918,6 @@ export default function BookHomepage({ onLoginClick }) {
     setSpread(0);
     setMobilePageIndex(0);
     setPhase('OPENING');
-    // AnimatingCover calls onDone which triggers this:
   }, [phase]);
 
   const handleOpenDone = useCallback(() => {
@@ -1090,8 +986,34 @@ export default function BookHomepage({ onLoginClick }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [phase, goNext, goPrevOrClose, closeBook]);
 
-  const isFlipping = phase === 'FLIPPING_FWD' || phase === 'FLIPPING_BWD';
-  const flipDir    = phase === 'FLIPPING_FWD' ? 'forward' : phase === 'FLIPPING_BWD' ? 'backward' : null;
+  const isFlipping  = phase === 'FLIPPING_FWD' || phase === 'FLIPPING_BWD';
+  const flipDir     = phase === 'FLIPPING_FWD' ? 'forward' : phase === 'FLIPPING_BWD' ? 'backward' : null;
+  const isAnimating = phase === 'OPENING' || phase === 'CLOSING' || isFlipping;
+
+  /* ── Body scroll lock: prevent scrollbar flash during every animation phase ── */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (isAnimating) {
+      const scrollY = window.scrollY;
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.top      = `-${scrollY}px`;
+      document.body.style.width    = '100%';
+    } else {
+      const savedTop = document.body.style.top;
+      document.body.style.overflow  = '';
+      document.body.style.position  = '';
+      document.body.style.top       = '';
+      document.body.style.width     = '';
+      if (savedTop) window.scrollTo(0, parseInt(savedTop, 10) * -1);
+    }
+    return () => {
+      document.body.style.overflow  = '';
+      document.body.style.position  = '';
+      document.body.style.top       = '';
+      document.body.style.width     = '';
+    };
+  }, [isAnimating]);
 
   return (
     <>
@@ -1101,28 +1023,40 @@ export default function BookHomepage({ onLoginClick }) {
       />
 
       <main style={{
-        minHeight: '100vh',
+        minHeight: '100dvh',
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
         padding: 0, background: '#f4f1ec',
         position: 'relative',
+        overflowX: 'visible',
       }}>
         <h1 style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0 }}>
           Uganda Expressway Integrated Manual — interactive book preview
         </h1>
 
-        <div style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '1rem', minHeight: 'min(94vh,820px)' }}>
+        <div
+          data-animating={isAnimating ? 'true' : undefined}
+          style={{
+            width: '100%',
+            display: 'flex', justifyContent: 'center', alignItems: 'center',
+            padding: 'clamp(12px, 2.5vh, 48px) clamp(12px, 5vw, 80px)',
+            minHeight: 'min(94vh, 880px)',
+            boxSizing: 'border-box',
+            /* Room for page corners during 3-D rotation — avoid clipping sheets in a rigid frame */
+            overflow: 'visible',
+            /* Disable all clicks/taps while any animation is running */
+            pointerEvents: isAnimating ? 'none' : undefined,
+          }}
+        >
 
           {/* CLOSED: static cover */}
           {phase === 'CLOSED' && (
             <BookCover onClick={openBook} tiltEnabled={!isTouchLike} />
           )}
 
-          {/* OPENING ─ desktop: blank pages flip open; mobile: cover rotates */}
+          {/* OPENING — crossfade: one-page cover → two-page spread (all viewports) */}
           {phase === 'OPENING' && (
-            isMobile
-              ? <AnimatingCover mode="opening" onDone={handleOpenDone} />
-              : <BookOpeningAnimation onDone={handleOpenDone} onLoginClick={handleLogin} />
+            <BookOpeningAnimation onDone={handleOpenDone} />
           )}
 
           {/* OPEN / FLIPPING: two-page spread */}
@@ -1142,91 +1076,145 @@ export default function BookHomepage({ onLoginClick }) {
             />
           )}
 
-          {/* CLOSING ─ desktop: pages fold closed (2→1); mobile: cover rotates back */}
+          {/* CLOSING — crossfade: spread → portrait cover (all viewports) */}
           {phase === 'CLOSING' && (
-            isMobile
-              ? <AnimatingCover mode="closing" onDone={handleCloseDone} />
+            spread === 0
+              ? <BookClosingSpreadZero onDone={handleCloseDone} />
               : <BookClosingAnimation spread={spread} onDone={handleCloseDone} onLoginClick={handleLogin} />
           )}
 
         </div>
 
-        {/* Contact button — fixed bottom-right, always visible */}
-        <ContactButton />
       </main>
 
       <style>{`
-        /* ── Opening phase 1: cover slides from center to right half ── */
-        @keyframes coverOpenSlide {
-          0%   { transform: translateX(-50%); }
-          100% { transform: translateX(0);    }
+        /* Reserve scrollbar width at all times so the layout never shifts when
+           overflow:auto kicks in during page navigation or animation. */
+        html {
+          scrollbar-gutter: stable;
+          overflow-y: scroll;
         }
 
-        /* ── Opening phase 2: cover flips open (right→left, spine pivot) ── */
-        @keyframes coverOpenFlip {
-          0%   { transform: rotateY(0deg);    }
-          100% { transform: rotateY(-180deg); }
+        /* ── Open / close: no hinge flips — fade & light motion only ── */
+        @keyframes openingSpreadEnter {
+          from {
+            opacity: 0;
+            transform: translateY(12px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes openingCoverDismiss {
+          from {
+            opacity: 1;
+          }
+          to {
+            opacity: 0;
+          }
         }
 
-        /* ── Closing: element fades out (spread / SpreadShell fade) ── */
-        @keyframes spreadFadeOut {
-          0%   { opacity: 1; }
-          100% { opacity: 0; }
+        /* Generic spread → cover */
+        @keyframes closingSpreadDissolve {
+          0% {
+            opacity: 1;
+          }
+          52% {
+            opacity: 1;
+          }
+          100% {
+            opacity: 0;
+          }
+        }
+        @keyframes closingCoverReveal {
+          0%, 40% {
+            opacity: 0;
+          }
+          100% {
+            opacity: 1;
+          }
         }
 
-        /* ── Closing phase 1: left page flips left → right, cover on back face ── */
-        @keyframes leftPageCloseFlip {
-          0%   { transform: rotateY(0deg);   }
-          100% { transform: rotateY(180deg); }
+        /* First spread (same timing family) */
+        @keyframes closingSpreadDissolveHome {
+          0% {
+            opacity: 1;
+          }
+          52% {
+            opacity: 1;
+          }
+          100% {
+            opacity: 0;
+          }
         }
-
-        /* ── Closing phase 2: portrait cover slides from right into center ── */
-        /* Starts simultaneously with the flip; fades in gradually           */
-        @keyframes coverCloseSlide {
-          0%   { transform: translateX(50%); opacity: 0;   }
-          30%  { opacity: 0;                               }
-          55%  { opacity: 1; transform: translateX(18%);   }
-          100% { transform: translateX(0);   opacity: 1;   }
+        @keyframes closingCoverRevealHome {
+          0%, 38% {
+            opacity: 0;
+          }
+          100% {
+            opacity: 1;
+          }
         }
 
         /* ── Page flip forward: right page sweeps right→left (full 180 °) ── */
-        /*    Both faces use backface-visibility:hidden, so front shows 0–90°  */
-        /*    and back shows 90–180°. Visible the entire way across.           */
         @keyframes pageFlipFwd {
-          0%   { transform: rotateY(0deg);    }
-          100% { transform: rotateY(-180deg); }
+          0% {
+            transform: rotateY(0deg);
+          }
+          100% {
+            transform: rotateY(-180deg);
+          }
         }
 
         /* ── Page flip backward: left page sweeps left→right (full 180 °) ── */
         @keyframes pageFlipBwd {
-          0%   { transform: rotateY(0deg);   }
-          100% { transform: rotateY(180deg); }
+          0% {
+            transform: rotateY(0deg);
+          }
+          100% {
+            transform: rotateY(180deg);
+          }
         }
 
-        /* ── Mobile cover open/close (portrait rotateY) ── */
-        @keyframes bookCoverOpen {
-          0%   { transform: translateY(0px)  rotateY(0deg);    opacity: 1; }
-          8%   { transform: translateY(-6px) rotateY(0deg);    opacity: 1; }
-          55%  { transform: translateY(-6px) rotateY(-90deg);  opacity: 1; }
-          90%  { transform: translateY(-6px) rotateY(-175deg); opacity: 0.4; }
-          100% { transform: translateY(-6px) rotateY(-180deg); opacity: 0; }
+        /* Mobile fallback if AnimatingCover is ever used */
+        @keyframes mobileCoverOpenFade {
+          from {
+            opacity: 1;
+          }
+          to {
+            opacity: 0;
+          }
         }
-        @keyframes bookCoverClose {
-          0%   { transform: translateY(-6px) rotateY(-180deg); opacity: 0; }
-          10%  { transform: translateY(-6px) rotateY(-175deg); opacity: 0.4; }
-          45%  { transform: translateY(-6px) rotateY(-90deg);  opacity: 1; }
-          92%  { transform: translateY(-6px) rotateY(0deg);    opacity: 1; }
-          100% { transform: translateY(0px)  rotateY(0deg);    opacity: 1; }
+        @keyframes mobileCoverCloseFade {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
         }
 
         /* ── Mobile flip: horizontal slide-out (2× slower via FLIP_MS) ── */
         @keyframes mobileFlipFwd {
-          0%   { transform: translateX(0);    opacity: 1; }
-          100% { transform: translateX(-12%); opacity: 0; }
+          0% {
+            transform: translateX(0);
+            opacity: 1;
+          }
+          100% {
+            transform: translateX(-12%);
+            opacity: 0;
+          }
         }
         @keyframes mobileFlipBwd {
-          0%   { transform: translateX(0);   opacity: 1; }
-          100% { transform: translateX(12%); opacity: 0; }
+          0% {
+            transform: translateX(0);
+            opacity: 1;
+          }
+          100% {
+            transform: translateX(12%);
+            opacity: 0;
+          }
         }
       `}</style>
     </>

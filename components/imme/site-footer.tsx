@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { IMME_NAV, IMME_PARTNERS, IMME_PROJECT } from "@/lib/imme/project";
+import { IMME_NAV, IMME_PARTNERS, IMME_PROJECT, IMME_TEAM_EMAILS } from "@/lib/imme/project";
 
 /**
  * Footer — Brief §6 "Footer" with refreshed hierarchy:
@@ -73,13 +73,20 @@ export function SiteFooter() {
                 <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-white/45">Duration</span>
                 <span className="font-mono text-[13px]">{IMME_PROJECT.durationLabel}</span>
               </li>
-              <li className="pt-1">
-                <Link
-                  href="/contact"
-                  className="imme-btn-amber inline-flex w-full justify-center sm:w-auto"
-                >
-                  Contact the project
-                </Link>
+              <li className="border-t border-white/10 pt-4">
+                <span className="mb-2 block font-mono text-[10px] uppercase tracking-[0.18em] text-white/45">Team</span>
+                <p className="text-[13px] leading-relaxed text-white/88">
+                  {IMME_TEAM_EMAILS.developer.role}:{" "}
+                  <a href={`mailto:${IMME_TEAM_EMAILS.developer.email}`} className="text-white underline decoration-white/30 underline-offset-2 hover:text-imme-amber-200">
+                    {IMME_TEAM_EMAILS.developer.email}
+                  </a>
+                </p>
+                <p className="mt-2 text-[13px] leading-relaxed text-white/88">
+                  {IMME_TEAM_EMAILS.projectManager.role}:{" "}
+                  <a href={`mailto:${IMME_TEAM_EMAILS.projectManager.email}`} className="text-white underline decoration-white/30 underline-offset-2 hover:text-imme-amber-200">
+                    {IMME_TEAM_EMAILS.projectManager.email}
+                  </a>
+                </p>
               </li>
             </ul>
           </div>

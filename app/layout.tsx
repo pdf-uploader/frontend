@@ -30,16 +30,16 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "IMME Project — Uganda Expressways",
-    template: "%s — IMME Project",
+    default: "Expressway Integrated Manual",
+    template: "%s — Expressway Integrated Manual",
   },
   description:
     "KOICA-funded Korea–Uganda cooperation delivering integrated lifecycle manuals and a bridge management system pilot for Uganda's expressways.",
   manifest: "/mainfest.json",
-  applicationName: "IMME Project",
+  applicationName: "Expressway Integrated Manual",
   appleWebApp: {
     capable: true,
-    title: "IMME Project",
+    title: "Expressway Integrated Manual",
     statusBarStyle: "black-translucent",
   },
   icons: {

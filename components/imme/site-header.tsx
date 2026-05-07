@@ -1,10 +1,81 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { hasAuthSession } from "@/lib/auth-session";
 import { isAdminUser } from "@/lib/auth-user";
+import { IMME_TEAM_EMAILS } from "@/lib/imme/project";
+
+const contactBtnClass =
+  "inline-flex items-center justify-center rounded-full border border-imme-line bg-white px-3 py-1.5 text-xs font-semibold text-imme-navy transition hover:bg-imme-concrete sm:px-4 sm:text-[13px]";
+
+function ContactPopoverButton({ onNavigate }: { onNavigate?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        className={contactBtnClass}
+        aria-expanded={open}
+        aria-controls="site-header-contact-panel"
+        id="site-header-contact-trigger"
+        onClick={() => setOpen((v) => !v)}
+      >
+        Contact
+      </button>
+      {open ? (
+        <div
+          id="site-header-contact-panel"
+          role="region"
+          aria-labelledby="site-header-contact-trigger"
+          className="absolute right-0 top-full z-[60] mt-2 w-[min(calc(100vw-24px),18rem)] rounded-imme border border-imme-line bg-white px-3 py-3 text-left shadow-imme-card"
+        >
+          <p className="font-serif text-[12px] leading-relaxed text-imme-navy">
+            <span className="font-semibold">{IMME_TEAM_EMAILS.developer.role}: </span>
+            <a
+              href={`mailto:${IMME_TEAM_EMAILS.developer.email}`}
+              className="text-imme-navy underline decoration-imme-line underline-offset-2 hover:text-imme-navy-700"
+              {...(onNavigate ? { onClick: onNavigate } : {})}
+            >
+              {IMME_TEAM_EMAILS.developer.email}
+            </a>
+          </p>
+          <p className="mt-2 font-serif text-[12px] leading-relaxed text-imme-navy">
+            <span className="font-semibold">{IMME_TEAM_EMAILS.projectManager.role}: </span>
+            <a
+              href={`mailto:${IMME_TEAM_EMAILS.projectManager.email}`}
+              className="text-imme-navy underline decoration-imme-line underline-offset-2 hover:text-imme-navy-700"
+              {...(onNavigate ? { onClick: onNavigate } : {})}
+            >
+              {IMME_TEAM_EMAILS.projectManager.email}
+            </a>
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export function SiteHeader() {
   return (
@@ -29,29 +100,21 @@ function StaffAuthCluster({
   onNavigate?: () => void;
 }) {
   const auth = useAuth();
-  const pathname = usePathname() ?? "/";
   const loggedIn = hasAuthSession(auth);
-  const libraryActive =
-    pathname === "/search" || pathname.startsWith("/folders/") || pathname.startsWith("/files/");
 
   if (loggedIn) {
     return (
       <div className={["flex flex-wrap items-center gap-2", className].filter(Boolean).join(" ")}>
         <Link
-          href="/search"
+          href="/dashboard"
           onClick={onNavigate}
-          className={[
-            "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold transition sm:min-h-[36px] sm:px-4 sm:text-[13px]",
-            libraryActive
-              ? "bg-imme-navy text-white shadow-sm"
-              : "border border-imme-navy bg-white text-imme-navy hover:bg-imme-navy hover:text-white",
-          ].join(" ")}
+          className="inline-flex items-center justify-center rounded-full border border-imme-line bg-white px-3 py-1.5 text-xs font-semibold text-imme-navy transition hover:bg-imme-concrete sm:px-4 sm:text-[13px]"
         >
-          Document library
+          Folders
         </Link>
         {isAdminUser(auth.user) ? (
           <Link
-            href="/admin"
+            href="/users"
             onClick={onNavigate}
             className="inline-flex items-center justify-center rounded-full border border-imme-line bg-white px-3 py-1.5 text-xs font-semibold text-imme-ink transition hover:bg-imme-concrete sm:px-4 sm:text-[13px]"
           >
@@ -64,10 +127,11 @@ function StaffAuthCluster({
 
   return (
     <div className={["flex flex-wrap items-center gap-2", className].filter(Boolean).join(" ")}>
+      <ContactPopoverButton onNavigate={onNavigate} />
       <Link
         href="/login"
         onClick={onNavigate}
-        className="inline-flex items-center justify-center rounded-full bg-imme-navy px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-imme-navy-700 sm:min-h-[36px] sm:px-4 sm:text-[13px]"
+        className="inline-flex min-h-[36px] items-center justify-center rounded-full bg-imme-navy px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-imme-navy-700 sm:px-4 sm:text-[13px]"
       >
         Log in
       </Link>

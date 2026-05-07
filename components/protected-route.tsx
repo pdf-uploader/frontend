@@ -30,7 +30,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
       router.replace("/login");
     }
     if (loggedIn && (pathname === "/login" || pathname === "/signup")) {
-      router.replace("/search");
+      router.replace("/dashboard");
     }
   }, [loggedIn, isStaff, pathname, router]);
 

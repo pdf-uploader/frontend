@@ -9,7 +9,7 @@ import { SiteHeader } from "@/components/imme/site-header";
  */
 export function ImmePublicShell({ children }: { children: ReactNode }) {
   return (
-    <div className="relative flex min-h-screen flex-col overflow-x-hidden">
+    <div className="relative flex min-h-screen flex-col overflow-x-visible">
       <SiteHeader />
       <main className="relative flex-1">{children}</main>
     </div>

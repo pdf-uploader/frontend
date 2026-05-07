@@ -10,6 +10,7 @@ import { isAdminUser } from "@/lib/auth-user";
 import { api } from "@/lib/api";
 import { DocumentChatWidget } from "@/components/document-chat-widget";
 import { useAuth } from "@/lib/hooks/use-auth";
+import { pickRandomSpineColor, resolveShelfSpineColor } from "@/lib/folder-spine-color";
 import { Folder } from "@/lib/types";
 
 /* ── Design tokens (matches BookHomepage.jsx) ── */
@@ -24,29 +25,6 @@ const C = {
   muted:   "#a07848",
   spine:   "#f0e8d8", // page-edge cream
 };
-
-/* ── Per-folder spine colors (name → colour) ── */
-const SPINE_COLORS: Record<string, string> = {
-  "Planning Manual":                "#1a2744",
-  "Expressway Planning Manual":     "#1a2744",
-  "Design Manual":                  "#2d5a3d",
-  "Construction Manual":            "#7a3020",
-  "Construction Specification":     "#4a3060",
-  "Operation Manual":               "#1a4a5a",
-  "Maintenance Manual":             "#5a4a10",
-  "PPP Feasibility Review Guideline":"#3a2010",
-  "PPP Feasibility Review":         "#3a2010",
-  "BMS User Manual":                "#1a3a5a",
-  "Expressway Development Manual":  "#3a3a3a",
-  "My Life":                        "#2a1a2a",
-};
-const FALLBACK_COLORS = [
-  "#1a2744","#2d5a3d","#7a3020","#4a3060","#1a4a5a",
-  "#5a4a10","#3a2010","#1a3a5a","#3a3a3a","#2a1a2a",
-];
-function spineColor(folder: Folder, index: number): string {
-  return SPINE_COLORS[folder.foldername] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length]!;
-}
 
 const BOOKS_PER_SHELF = 5;
 const PAGE_CHUNK_SIZE = 5;
@@ -80,6 +58,7 @@ export function FolderBrowser() {
   const [draggedFolderId,   setDraggedFolderId]    = useState<string | null>(null);
   const [dragOverFolderId,  setDragOverFolderId]   = useState<string | null>(null);
   const [lockedModal,       setLockedModal]        = useState<string | null>(null);
+  const [deleteConfirm,      setDeleteConfirm]      = useState<{ id: string; name: string } | null>(null);
   const orderedFoldersRef   = useRef<Folder[]>([]);
   const folderDragGhostRef  = useRef<HTMLDivElement | null>(null);
   const folderDragPointerOffsetRef = useRef({ x: 0, y: 0 });
@@ -99,7 +78,7 @@ export function FolderBrowser() {
 
   const createFolderMutation = useMutation({
     mutationFn: async ({ foldername, lock, order }: { foldername: string; lock: boolean; order: number }) =>
-      api.post("/folders", { foldername, lock, order }),
+      api.post("/folders", { foldername, lock, order, spineColor: pickRandomSpineColor() }),
     onSuccess: () => {
       setNewFolderName(""); setNewFolderLock(false);
       queryClient.invalidateQueries({ queryKey: ["folders"] });
@@ -335,25 +314,17 @@ export function FolderBrowser() {
           folders={shelfFolders}
           shelfIndex={shelfIndex}
           admin={admin}
-          editingFolderId={editingFolderId}
-          folderNameDraft={folderNameDraft}
-          folderLockDraft={folderLockDraft}
           draggedFolderId={draggedFolderId}
           dragOverFolderId={dragOverFolderId}
-          renamePending={renameFolderMutation.isPending}
-          deletePending={deleteFolderMutation.isPending}
           onOpenLocked={setLockedModal}
           onEditToggle={(id) => {
-            setEditingFolderId(prev => prev === id ? null : id);
-            const f = orderedFolders.find(f => f.id === id);
-            if (f) { setFolderNameDraft(f.foldername); setFolderLockDraft(!!f.lock); }
+            setEditingFolderId((prev) => (prev === id ? null : id));
+            const f = orderedFolders.find((x) => x.id === id);
+            if (f) {
+              setFolderNameDraft(f.foldername);
+              setFolderLockDraft(!!f.lock);
+            }
           }}
-          onDraftNameChange={setFolderNameDraft}
-          onDraftLockChange={setFolderLockDraft}
-          onSave={(folderId) => renameFolderMutation.mutate({
-            folderId, foldername: folderNameDraft.trim(), lock: folderLockDraft,
-          })}
-          onDelete={(folderId) => deleteFolderMutation.mutate(folderId)}
           onDragStart={(folderId, event, cardEl) => {
             setDraggedFolderId(folderId);
             event.dataTransfer.effectAllowed = "move";
@@ -385,6 +356,48 @@ export function FolderBrowser() {
           globalStartIndex={shelfIndex * BOOKS_PER_SHELF}
         />
       ))}
+
+      {/* Admin: folder edit floats over shelf (layout does not shift) */}
+      {admin && editingFolderId && (
+        <div
+          role="dialog"
+          aria-modal
+          aria-labelledby="folder-edit-title"
+          onClick={() => { setEditingFolderId(null); setFolderNameDraft(""); setFolderLockDraft(false); }}
+          style={{
+            position: "fixed", inset: 0, zIndex: 940,
+            background: "rgba(10,16,34,0.38)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div onClick={(e) => e.stopPropagation()}>
+            <p id="folder-edit-title" style={{ fontFamily: fontSerif, fontSize: 16, fontWeight: 700, color: C.navy, marginBottom: 10 }}>
+              Edit folder
+            </p>
+            <EditPanel
+              nameDraft={folderNameDraft}
+              lockDraft={folderLockDraft}
+              onNameChange={setFolderNameDraft}
+              onLockChange={setFolderLockDraft}
+              onSave={() => {
+                renameFolderMutation.mutate({
+                  folderId: editingFolderId,
+                  foldername: folderNameDraft.trim(),
+                  lock: folderLockDraft,
+                });
+              }}
+              onCancel={() => { setEditingFolderId(null); setFolderNameDraft(""); setFolderLockDraft(false); }}
+              onRequestDelete={() => {
+                const f = orderedFolders.find((x) => x.id === editingFolderId);
+                if (f) setDeleteConfirm({ id: f.id, name: f.foldername });
+              }}
+              renamePending={renameFolderMutation.isPending}
+              deletePending={deleteFolderMutation.isPending}
+            />
+          </div>
+        </div>
+      )}
 
       {/* ── Locked book modal ── */}
       {lockedModal && (
@@ -435,6 +448,69 @@ export function FolderBrowser() {
         </div>
       )}
 
+      {/* ── Confirm delete folder ── */}
+      {deleteConfirm && (
+        <div
+          role="alertdialog"
+          aria-modal
+          aria-labelledby="delete-folder-title"
+          onClick={() => setDeleteConfirm(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 1000,
+            background: "rgba(10,16,34,0.45)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: C.paper, border: `1px solid ${C.border}`,
+              borderRadius: 6, padding: "26px 28px", maxWidth: 400, width: "100%",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.20)",
+            }}
+          >
+            <h3 id="delete-folder-title" style={{
+              fontFamily: fontSerif, fontSize: 18, color: C.navy, marginBottom: 12,
+            }}>
+              Delete folder?
+            </h3>
+            <p style={{ fontFamily: fontBody, fontSize: 14, color: C.muted, lineHeight: 1.55, marginBottom: 20 }}>
+              This will permanently delete <strong style={{ color: C.navy }}>{deleteConfirm.name}</strong>
+              {" "}and remove its volumes from the library. This cannot be undone.
+            </p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirm(null)}
+                style={{
+                  fontFamily: fontBody, fontSize: 13, color: C.navy,
+                  background: "white", border: `1px solid ${C.border}`,
+                  borderRadius: 4, padding: "8px 16px", cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteFolderMutation.isPending}
+                onClick={() => deleteFolderMutation.mutate(deleteConfirm.id, {
+                  onSettled: () => setDeleteConfirm(null),
+                })}
+                style={{
+                  fontFamily: fontBody, fontSize: 13, color: "white",
+                  background: "#c0392b", border: "none",
+                  borderRadius: 4, padding: "8px 16px", cursor: "pointer",
+                  opacity: deleteFolderMutation.isPending ? 0.7 : 1,
+                }}
+              >
+                {deleteFolderMutation.isPending ? "Deleting…" : "Delete folder"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <DocumentChatWidget />
     </section>
   );
@@ -448,19 +524,10 @@ type ShelfProps = {
   shelfIndex: number;
   globalStartIndex: number;
   admin: boolean;
-  editingFolderId: string | null;
-  folderNameDraft: string;
-  folderLockDraft: boolean;
   draggedFolderId: string | null;
   dragOverFolderId: string | null;
-  renamePending: boolean;
-  deletePending: boolean;
   onOpenLocked: (id: string) => void;
   onEditToggle: (id: string) => void;
-  onDraftNameChange: (v: string) => void;
-  onDraftLockChange: (v: boolean) => void;
-  onSave: (id: string) => void;
-  onDelete: (id: string) => void;
   onDragStart: (id: string, event: DragEvent<HTMLElement>, el: HTMLElement) => void;
   onDrag: (event: DragEvent<HTMLElement>) => void;
   onDragEnd: () => void;
@@ -471,11 +538,8 @@ type ShelfProps = {
 
 function Shelf({
   folders, shelfIndex, globalStartIndex, admin,
-  editingFolderId, folderNameDraft, folderLockDraft,
   draggedFolderId, dragOverFolderId,
-  renamePending, deletePending,
-  onOpenLocked, onEditToggle, onDraftNameChange, onDraftLockChange,
-  onSave, onDelete,
+  onOpenLocked, onEditToggle,
   onDragStart, onDrag, onDragEnd, onDragOver, onDragLeave, onDrop,
 }: ShelfProps) {
   const router = useRouter();
@@ -483,7 +547,6 @@ function Shelf({
   const [pullingId,  setPullingId]  = useState<string | null>(null); // "pull off shelf" exit anim
 
   const handleBookClick = (folder: Folder) => {
-    if (admin && editingFolderId === folder.id) return;
     if (folder.lock && !admin) { onOpenLocked(folder.id); return; }
     setPullingId(folder.id);
     setTimeout(() => {
@@ -508,9 +571,8 @@ function Shelf({
       }}>
         {folders.map((folder, idx) => {
           const absIdx   = globalStartIndex + idx;
-          const color    = spineColor(folder, absIdx);
+          const color    = resolveShelfSpineColor(folder);
           const isLocked = !!folder.lock && !admin;
-          const isEditing = admin && editingFolderId === folder.id;
           const isHovered = hoveredId === folder.id && !pullingId;
           const isPulling = pullingId === folder.id;
           const isDragged = draggedFolderId === folder.id;
@@ -520,6 +582,7 @@ function Shelf({
             <BookSpine
               folder={folder}
               color={color}
+              folderSealed={!!folder.lock}
               isLocked={isLocked}
               isHovered={isHovered}
               isPulling={isPulling}
@@ -548,20 +611,6 @@ function Shelf({
                 style={{ display: "flex", flexDirection: "column", alignItems: "center" }}
               >
                 {bookEl}
-                {/* Admin edit panel below book */}
-                {isEditing && (
-                  <EditPanel
-                    folderId={folder.id}
-                    nameDraft={folderNameDraft}
-                    lockDraft={folderLockDraft}
-                    onNameChange={onDraftNameChange}
-                    onLockChange={onDraftLockChange}
-                    onSave={() => onSave(folder.id)}
-                    onDelete={() => onDelete(folder.id)}
-                    renamePending={renamePending}
-                    deletePending={deletePending}
-                  />
-                )}
               </div>
             );
           }
@@ -590,6 +639,8 @@ function Shelf({
 type BookSpineProps = {
   folder: Folder;
   color: string;
+  /** Locked at folder level — sealed leather-style spine vs open paper reference */
+  folderSealed: boolean;
   isLocked: boolean;
   isHovered: boolean;
   isPulling: boolean;
@@ -603,7 +654,7 @@ type BookSpineProps = {
 };
 
 function BookSpine({
-  folder, color, isLocked,
+  folder, color, folderSealed, isLocked,
   isHovered, isPulling, isDragged, isDragOver,
   admin, onHoverIn, onHoverOut, onClick, onEditToggle,
 }: BookSpineProps) {
@@ -624,6 +675,8 @@ function BookSpine({
       ? "-4px 10px 24px rgba(0,0,0,0.32), inset -4px 0 8px rgba(0,0,0,0.18)"
       : "-2px 4px 10px rgba(0,0,0,0.18), inset -4px 0 8px rgba(0,0,0,0.12)";
 
+  const openReferenceSpine = !folderSealed;
+
   return (
     /* perspective per book so translateZ works */
     <div style={{ perspective: 500, marginBottom: 2 }}>
@@ -632,8 +685,7 @@ function BookSpine({
           position: "relative",
           display: "flex",
           cursor: isLocked && !admin ? "not-allowed" : "pointer",
-          opacity: isDragged ? 0.35 : isLocked && !admin ? 0.75 : 1,
-          filter: isLocked && !admin ? "saturate(0.55)" : "none",
+          opacity: isDragged ? 0.35 : 1,
           transition: "transform 150ms ease-out, box-shadow 150ms, opacity 200ms",
           transform,
         }}
@@ -645,7 +697,9 @@ function BookSpine({
         <div
           style={{
             width: W, height: H,
-            background: color,
+            background: openReferenceSpine
+              ? `linear-gradient(160deg,#faf8f3 0%,#ebe3d6 42%,#e0d4c8 100%)`
+              : color,
             position: "relative",
             display: "flex",
             flexDirection: "column",
@@ -655,18 +709,22 @@ function BookSpine({
             borderRadius: "2px 0 0 2px",
             overflow: "hidden",
             transition: "box-shadow 150ms",
+            border: openReferenceSpine ? `1px solid rgba(26,39,68,0.12)` : "none",
+            borderRight: "none",
           }}
         >
-          {/* Gold accent stripe */}
+          {/* Accent stripe */}
           <div style={{
             position: "absolute", top: 14, left: 0, right: 0,
-            height: 3, background: C.gold, opacity: 0.9,
+            height: 3,
+            background: openReferenceSpine ? "rgba(201,124,42,0.55)" : C.gold,
+            opacity: openReferenceSpine ? 1 : 0.9,
           }} />
 
-          {/* Top cap (slightly darker) */}
+          {/* Top cap */}
           <div style={{
             position: "absolute", top: 0, left: 0, right: 0, height: 8,
-            background: "rgba(0,0,0,0.22)",
+            background: openReferenceSpine ? "rgba(26,39,68,0.06)" : "rgba(0,0,0,0.22)",
           }} />
 
           {/* Title (vertical, rotated) */}
@@ -682,7 +740,7 @@ function BookSpine({
               fontFamily: fontSerif,
               fontSize: folder.foldername.length > 20 ? 10 : 12,
               fontWeight: 600,
-              color: "rgba(255,255,255,0.92)",
+              color: openReferenceSpine ? C.navy : "rgba(255,255,255,0.92)",
               letterSpacing: "0.03em",
               lineHeight: 1.25,
               textAlign: "center",
@@ -693,10 +751,10 @@ function BookSpine({
             </span>
           </div>
 
-          {/* Lock / file count at bottom */}
+          {/* Lock / file count / open label */}
           <div style={{
             fontFamily: fontBody, fontSize: 9,
-            color: "rgba(255,255,255,0.65)",
+            color: openReferenceSpine ? C.muted : "rgba(255,255,255,0.65)",
             letterSpacing: "0.04em",
             textAlign: "center",
             paddingBottom: 2,
@@ -708,9 +766,10 @@ function BookSpine({
         {/* Right face — stacked pages edge */}
         <div style={{
           width: 9, height: H,
-          background: "#f0e8d8",
-          backgroundImage:
-            "repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.04) 2px,rgba(0,0,0,0.04) 3px)",
+          background: openReferenceSpine ? "#f5eee2" : "#f0e8d8",
+          backgroundImage: openReferenceSpine
+            ? "repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(26,39,68,0.06) 2px,rgba(26,39,68,0.06) 3px)"
+            : "repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.04) 2px,rgba(0,0,0,0.04) 3px)",
           borderRadius: "0 2px 2px 0",
           boxShadow: "inset -1px 0 3px rgba(0,0,0,0.08)",
         }} />
@@ -766,24 +825,24 @@ function BookSpine({
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   EditPanel — shown below a book when admin clicks edit
+   EditPanel — admin folder edit form (mounted in fullscreen overlay)
 ═══════════════════════════════════════════════════════════════ */
 function EditPanel({
-  folderId, nameDraft, lockDraft,
-  onNameChange, onLockChange, onSave, onDelete,
+  nameDraft, lockDraft,
+  onNameChange, onLockChange, onSave, onCancel, onRequestDelete,
   renamePending, deletePending,
 }: {
-  folderId: string; nameDraft: string; lockDraft: boolean;
+  nameDraft: string; lockDraft: boolean;
   onNameChange: (v: string) => void; onLockChange: (v: boolean) => void;
-  onSave: () => void; onDelete: () => void;
+  onSave: () => void; onCancel: () => void; onRequestDelete: () => void;
   renamePending: boolean; deletePending: boolean;
 }) {
   return (
     <div style={{
-      marginTop: 8, padding: "12px",
+      padding: "14px",
       background: C.paper, border: `1px solid ${C.border}`,
-      borderRadius: 4, width: 200,
-      boxShadow: "0 4px 12px rgba(0,0,0,0.10)",
+      borderRadius: 8, width: 260,
+      boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
     }}>
       <input
         value={nameDraft}
@@ -802,24 +861,37 @@ function EditPanel({
           style={{ accentColor: C.navy }} />
         Lock folder
       </label>
-      <div style={{ display: "flex", gap: 6 }}>
-        <button type="button" onClick={onSave}
-          disabled={!nameDraft.trim() || renamePending}
-          style={{
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={!nameDraft.trim() || renamePending}
+            style={{
             flex: 1, padding: "5px 0",
             fontFamily: fontBody, fontSize: 11, color: "white",
             background: C.navy, border: "none", borderRadius: 3, cursor: "pointer",
             opacity: !nameDraft.trim() ? 0.5 : 1,
           }}>
-          {renamePending ? "Saving…" : "Save"}
-        </button>
-        <button type="button" onClick={onDelete} disabled={deletePending}
+            {renamePending ? "Saving…" : "Save"}
+          </button>
+          <button type="button" onClick={onCancel}
+            style={{
+              flex: 1, padding: "5px 0",
+              fontFamily: fontBody, fontSize: 11, color: C.navy,
+              background: "transparent", border: `1px solid ${C.border}`, borderRadius: 3, cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+        <button type="button" onClick={onRequestDelete} disabled={deletePending}
           style={{
-            flex: 1, padding: "5px 0",
+            width: "100%", padding: "5px 0",
             fontFamily: fontBody, fontSize: 11, color: "white",
             background: "#c0392b", border: "none", borderRadius: 3, cursor: "pointer",
           }}>
-          {deletePending ? "…" : "Delete"}
+          {deletePending ? "…" : "Delete folder"}
         </button>
       </div>
     </div>

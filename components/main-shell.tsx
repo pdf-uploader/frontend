@@ -11,8 +11,9 @@ import { ImmePublicShell } from "@/components/imme/imme-public-shell";
  *   - Public IMME routes (Home, About, Manuals, BMS, Progress, Capacity Building, News,
  *     Contact) render under `ImmePublicShell` (project header + footer).
  *   - Auth pages (`/login`, `/signup`) keep their custom branded full-bleed layout.
- *   - Authenticated staff workspace (admin, users, dashboard, folders, files) keeps the
- *     legacy `Navbar` + the existing `.ui-shell` content container.
+ *   - Authenticated staff workspace (admin, users, dashboard, folders, files, search) keeps the
+ *     legacy `Navbar` + the existing `.ui-shell` content container. Folder library: `/dashboard`;
+ *     manage users: `/users` (admins only). `/search` redirects to `/dashboard`.
  *
  * Adding a new public page: drop it under one of the prefixes in `PUBLIC_PREFIXES` (or extend
  * the list) and you'll automatically inherit the IMME header/footer, no per-page wiring needed.

@@ -7,6 +7,7 @@ import { APP_PUBLIC_BASE_URL, APP_USERS_PORTAL_URL } from "@/lib/app-site";
 import { parseUserStatus } from "@/lib/user-status";
 import { UserStatusBadge } from "@/components/user-status-badge";
 import { DeleteUserConfirmDialog } from "@/components/delete-user-confirm-dialog";
+import { pickRandomSpineColor } from "@/lib/folder-spine-color";
 import { AppUser, Folder, UserStatus } from "@/lib/types";
 
 export function AdminPanel() {
@@ -70,6 +71,7 @@ export function AdminPanel() {
         foldername: folderName,
         lock: createFolderLock,
         order: folderCount + 1,
+        spineColor: pickRandomSpineColor(),
       });
     },
     onSuccess: () => {

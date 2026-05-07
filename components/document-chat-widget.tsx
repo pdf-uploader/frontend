@@ -1,21 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, ReactNode } from "react";
+import { ReactNode } from "react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useMutation } from "@tanstack/react-query";
 import axios from "axios";
 import { api } from "@/lib/api";
-import {
-  READER_CHAT_ROOM,
-  getReaderChatFonts,
-  getReaderChatRoomStyles,
-} from "@/lib/reader-chat-room";
-import { useFixedChromeInverseScale } from "@/lib/hooks/use-fixed-chrome-inverse-scale";
 import { rehypeAppendStreamCursor } from "@/lib/rehype-append-stream-cursor";
 
+/* ── Design tokens ── */
+const C = {
+  navy:   "#1a2744",
+  gold:   "#c97c2a",
+  paper:  "#faf8f3",
+  border: "#d0c4aa",
+  muted:  "#8a7a60",
+  bg:     "#f4f1ec",
+};
+const fontSerif = "'Playfair Display', Georgia, serif";
+const fontBody  = "'Source Serif 4', Georgia, serif";
 
+/* ── Interfaces (unchanged) ── */
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -33,43 +39,30 @@ interface ChatModelOption {
   label: string;
 }
 
-/**
- * Chatbot endpoint URLs per chat context. Centralized so each surface (home library,
- * folder page, PDF reader) routes its `/chatbot/chat` POSTs through a clearly-named
- * variable; if any one needs to swap to a different backend route in the future,
- * change it here without touching the widget body.
- */
 const CHATBOT_REQUEST_URLS = {
-  /** Home library chat (no folder context). */
   library: "/chatbot/chat",
-  /** Folder page chat (folder-scoped). */
-  folder: "/chatbot/chat",
-  /** PDF reader chat (file/folder-scoped). */
-  reader: "/chatbot/chat",
+  folder:  "/chatbot/chat",
+  reader:  "/chatbot/chat",
 } as const;
 
 type ChatRequestContext = keyof typeof CHATBOT_REQUEST_URLS;
 
 function resolveChatRequestContext(folderId: string, layout: "default" | "reader"): ChatRequestContext {
-  if (layout === "reader") {
-    return "reader";
-  }
+  if (layout === "reader") return "reader";
   return folderId ? "folder" : "library";
 }
 
 interface DocumentChatWidgetProps {
-  /** Current folder for document-scoped chat; use "" on the home library. */
-  folderId?: string;
-  /** Z-index classes for fixed launcher + panel (use above fullscreen layers, e.g. `z-[70]`). */
-  stackZClass?: string;
-  /** Slightly larger panel + launcher (e.g. PDF book viewer). */
-  layout?: "default" | "reader";
-  /** Reader layout only: render at full size when the PDF is fullscreen. Non-fullscreen reader uses the halved-down sizing. */
+  folderId?:        string;
+  stackZClass?:     string;
+  layout?:          "default" | "reader";
   readerFullscreen?: boolean;
+  /** Optional display name for the current folder/context */
+  contextLabel?:    string;
 }
 
 const CHAT_MODEL_OPTIONS: readonly ChatModelOption[] = [
-  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  { id: "gemini-2.5-flash",      label: "Gemini 2.5 Flash" },
   { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
 ];
 
@@ -80,107 +73,79 @@ interface AssistantTypingState {
   referencedPages: ChatReferenceLink[];
 }
 
+function buildInitialGreeting(folderId: string, contextLabel?: string): string {
+  if (folderId && contextLabel) {
+    return `Good day. I can see you're in the **${contextLabel}**.\n\nAsk me about any section, specification, or procedure.`;
+  }
+  if (folderId) {
+    return "Good day. I can assist you with documents in this folder.\n\nAsk me about any section, specification, or procedure.";
+  }
+  return "Good day. I'm here to help you browse the manuals and find the right volume.\n\nWhich one can I help you locate?";
+}
+
+/* ── SVG Icons ── */
+function BookIcon({ size = 20, color = C.gold }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </svg>
+  );
+}
+
 export function DocumentChatWidget({
   folderId = "",
   stackZClass = "z-40",
   layout = "default",
-  readerFullscreen = false,
+  contextLabel,
 }: DocumentChatWidgetProps) {
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatInput, setChatInput] = useState("");
+  const [isChatOpen,      setIsChatOpen]      = useState(false);
+  const [chatInput,       setChatInput]       = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: "assistant-greeting",
-      role: "assistant",
-      text: "Hello! Ask me anything about your documents.",
-    },
-  ]);
+  const [chatMessages,    setChatMessages]    = useState<ChatMessage[]>(() => [{
+    id:   "assistant-greeting",
+    role: "assistant",
+    text: buildInitialGreeting(folderId, contextLabel),
+  }]);
   const [assistantTyping, setAssistantTyping] = useState<AssistantTypingState | null>(null);
-  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
-  const chatViewportRef = useRef<HTMLDivElement | null>(null);
-  const modelMenuRef = useRef<HTMLDivElement | null>(null);
+  const [showTooltip,     setShowTooltip]     = useState(false);
+  const [tooltipDismissed,setTooltipDismissed]= useState(false);
+  const [tabHovered,      setTabHovered]      = useState(false);
+  const [panelVisible,    setPanelVisible]    = useState(false);
+
+  const chatViewportRef    = useRef<HTMLDivElement | null>(null);
   const requestSequenceRef = useRef(0);
   const blockedRequestIdsRef = useRef<Set<number>>(new Set());
+  const textareaRef        = useRef<HTMLTextAreaElement | null>(null);
+  const tooltipTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isModelMenuOpen,  setIsModelMenuOpen]  = useState(false);
+  const modelMenuRef       = useRef<HTMLDivElement | null>(null);
+
   const chatRequestContext = resolveChatRequestContext(folderId, layout);
-  const chatRequestUrl = CHATBOT_REQUEST_URLS[chatRequestContext];
+  const chatRequestUrl     = CHATBOT_REQUEST_URLS[chatRequestContext];
 
-  const chatMutation = useMutation({
-    mutationFn: async ({
-      message,
-      requestId,
-      model,
-    }: {
-      message: string;
-      requestId: number;
-      model: string;
-    }) => {
-      const body = model
-        ? { folderId, model, message }
-        : { folderId, message };
-      const response = await api.post(chatRequestUrl, body);
-      const resolved = resolveChatbotResponse(response.data);
-      return { ...resolved, requestId };
-    },
-    onSuccess: ({ answer, referencedPages, requestId }) => {
-      if (blockedRequestIdsRef.current.has(requestId)) {
-        blockedRequestIdsRef.current.delete(requestId);
-        return;
-      }
-      const assistantMessageId = `${Date.now()}-assistant`;
-      const resolvedText = answer || "I couldn't generate a response. Please try again.";
-      setAssistantTyping({
-        messageId: assistantMessageId,
-        fullText: resolvedText,
-        cursor: 0,
-        referencedPages,
-      });
-    },
-    onError: (error, variables) => {
-      if (blockedRequestIdsRef.current.has(variables.requestId)) {
-        blockedRequestIdsRef.current.delete(variables.requestId);
-        return;
-      }
-      setChatMessages((previous) => [
-        ...previous,
-        {
-          id: `${Date.now()}-assistant-error`,
-          role: "assistant",
-          text: getChatbotErrorMessage(error),
-        },
-      ]);
-    },
-  });
-
+  /* ── Animate panel open/close ── */
   useEffect(() => {
-    setSelectedModelId((current) => {
-      if (current && CHAT_MODEL_OPTIONS.some((m) => m.id === current)) {
-        return current;
-      }
-      return CHAT_MODEL_OPTIONS[0]?.id ?? "";
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!isChatOpen) {
-      setIsModelMenuOpen(false);
+    if (isChatOpen) {
+      requestAnimationFrame(() => setPanelVisible(true));
+    } else {
+      setPanelVisible(false);
     }
   }, [isChatOpen]);
 
   useEffect(() => {
-    if (!isModelMenuOpen) {
-      return;
-    }
+    if (!isChatOpen) setIsModelMenuOpen(false);
+  }, [isChatOpen]);
+
+  useEffect(() => {
+    if (!isModelMenuOpen) return;
     const onPointerDown = (event: MouseEvent) => {
       const el = modelMenuRef.current;
-      if (el && !el.contains(event.target as Node)) {
-        setIsModelMenuOpen(false);
-      }
+      if (el && !el.contains(event.target as Node)) setIsModelMenuOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsModelMenuOpen(false);
-      }
+      if (event.key === "Escape") setIsModelMenuOpen(false);
     };
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -190,62 +155,109 @@ export function DocumentChatWidget({
     };
   }, [isModelMenuOpen]);
 
+  /* ── Idle tooltip: show after 3s, hide after 4s ── */
   useEffect(() => {
-    if (!chatViewportRef.current) {
-      return;
-    }
+    if (isChatOpen || tooltipDismissed) return;
+    tooltipTimerRef.current = setTimeout(() => {
+      setShowTooltip(true);
+      setTimeout(() => setShowTooltip(false), 4000);
+    }, 3000);
+    return () => {
+      if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    };
+  }, [isChatOpen, tooltipDismissed]);
+
+  /* ── / keyboard shortcut ── */
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "/" || isChatOpen) return;
+      const tag = (e.target as HTMLElement).tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || (e.target as HTMLElement).isContentEditable) return;
+      e.preventDefault();
+      setIsChatOpen(true);
+      setTooltipDismissed(true);
+      setShowTooltip(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [isChatOpen]);
+
+  /* ── Model init ── */
+  useEffect(() => {
+    setSelectedModelId(c => {
+      if (c && CHAT_MODEL_OPTIONS.some(m => m.id === c)) return c;
+      return CHAT_MODEL_OPTIONS[0]?.id ?? "";
+    });
+  }, []);
+
+  /* ── Auto-scroll ── */
+  useEffect(() => {
+    if (!chatViewportRef.current) return;
     chatViewportRef.current.scrollTo({
       top: chatViewportRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [chatMessages, chatMutation.isPending, isChatOpen]);
+  }, [chatMessages, isChatOpen]);
 
+  /* ── Typing animation ── */
   useEffect(() => {
-    if (!assistantTyping) {
-      return;
-    }
+    if (!assistantTyping) return;
     if (assistantTyping.cursor >= assistantTyping.fullText.length) {
       setAssistantTyping(null);
       return;
     }
-
     const currentChar = assistantTyping.fullText.charAt(assistantTyping.cursor);
     const delay = /[,.!?]/.test(currentChar) ? 85 : /\s/.test(currentChar) ? 22 : 14;
-
     const timer = window.setTimeout(() => {
       const nextCursor = assistantTyping.cursor + 1;
-      const nextText = assistantTyping.fullText.slice(0, nextCursor);
-      setChatMessages((previous) => {
-        const messageIndex = previous.findIndex((message) => message.id === assistantTyping.messageId);
-        if (messageIndex < 0) {
-          return [
-            ...previous,
-            {
-              id: assistantTyping.messageId,
-              role: "assistant",
-              text: nextText,
-              referencedPages: assistantTyping.referencedPages,
-            },
-          ];
-        }
-        return previous.map((message) =>
-          message.id === assistantTyping.messageId
-            ? {
-                ...message,
-                text: nextText,
-              }
-            : message
-        );
+      const nextText   = assistantTyping.fullText.slice(0, nextCursor);
+      setChatMessages(prev => {
+        const idx = prev.findIndex(m => m.id === assistantTyping.messageId);
+        if (idx < 0) return [...prev, {
+          id: assistantTyping.messageId, role: "assistant",
+          text: nextText, referencedPages: assistantTyping.referencedPages,
+        }];
+        return prev.map(m => m.id === assistantTyping.messageId ? { ...m, text: nextText } : m);
       });
-      setAssistantTyping((previous) =>
-        previous && previous.messageId === assistantTyping.messageId
-          ? { ...previous, cursor: nextCursor }
-          : previous
+      setAssistantTyping(p =>
+        p && p.messageId === assistantTyping.messageId ? { ...p, cursor: nextCursor } : p
       );
     }, delay);
-
     return () => window.clearTimeout(timer);
   }, [assistantTyping]);
+
+  /* ── Textarea auto-resize ── */
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 80)}px`;
+  }, [chatInput]);
+
+  const chatMutation = useMutation({
+    mutationFn: async ({ message, requestId, model }: { message: string; requestId: number; model: string }) => {
+      const body = model ? { folderId, model, message } : { folderId, message };
+      const response = await api.post(chatRequestUrl, body);
+      return { ...resolveChatbotResponse(response.data), requestId };
+    },
+    onSuccess: ({ answer, referencedPages, requestId }) => {
+      if (blockedRequestIdsRef.current.has(requestId)) {
+        blockedRequestIdsRef.current.delete(requestId); return;
+      }
+      const assistantMessageId = `${Date.now()}-assistant`;
+      const resolvedText = answer || "I couldn't generate a response. Please try again.";
+      setAssistantTyping({ messageId: assistantMessageId, fullText: resolvedText, cursor: 0, referencedPages });
+    },
+    onError: (error, variables) => {
+      if (blockedRequestIdsRef.current.has(variables.requestId)) {
+        blockedRequestIdsRef.current.delete(variables.requestId); return;
+      }
+      setChatMessages(prev => [...prev, {
+        id: `${Date.now()}-assistant-error`, role: "assistant",
+        text: getChatbotErrorMessage(error),
+      }]);
+    },
+  });
 
   const submitChatMessage = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -261,556 +273,563 @@ export function DocumentChatWidget({
     }
     const requestId = requestSequenceRef.current + 1;
     requestSequenceRef.current = requestId;
-    setChatMessages((previous) => [
-      ...previous,
-      {
-        id: `${Date.now()}-user`,
-        role: "user",
-        text: trimmedMessage,
-      },
-    ]);
+    setChatMessages(prev => [...prev, { id: `${Date.now()}-user`, role: "user", text: trimmedMessage }]);
     setChatInput("");
     chatMutation.mutate({ message: trimmedMessage, requestId, model: selectedModelId });
   };
 
   const stopConversation = () => {
-    if (chatMutation.isPending) {
-      blockedRequestIdsRef.current.add(requestSequenceRef.current);
-    }
+    if (chatMutation.isPending) blockedRequestIdsRef.current.add(requestSequenceRef.current);
     setAssistantTyping(null);
   };
 
+  const openChat = () => {
+    setIsChatOpen(true);
+    setTooltipDismissed(true);
+    setShowTooltip(false);
+  };
+
   const isConversationRunning = chatMutation.isPending || Boolean(assistantTyping);
+  const inputEmpty = !chatInput.trim();
   const selectedModelLabel =
     CHAT_MODEL_OPTIONS.find((m) => m.id === selectedModelId)?.label ?? CHAT_MODEL_OPTIONS[0]?.label ?? "";
   const modelPickerDisabled = chatMutation.isPending || Boolean(assistantTyping);
 
-  const isReaderLayout = layout === "reader";
-  /**
-   * All chat surfaces (home library, folder page, PDF reader fullscreen + non-fullscreen)
-   * render at the same "book preview" size — i.e. the halved reader geometry. Anchoring
-   * to a single sizing keeps the AI circle and panel visually consistent everywhere.
-   *
-   * `readerCompact` is also forced on so the panel uses the compact CSS branches
-   * (smaller padding, gaps, header chrome) regardless of where the widget renders.
-   */
-  const readerCompact = true;
-  const chatGeometry = getReaderChatRoomStyles({ fullscreen: false });
-  const chatFont = getReaderChatFonts(false);
-  const fixedChromeInverseScale = useFixedChromeInverseScale();
-
+  /* ══════════════════════════════════════════════════════
+     RENDER — Reference Librarian aesthetic
+  ══════════════════════════════════════════════════════ */
   return (
     <>
-            <button
-              onClick={() => setIsChatOpen((previous) => !previous)}
-              title={isChatOpen ? "Hide chatbot" : "Open chatbot"}
-              style={{
-                ...chatGeometry.fab,
-                // Match book-preview FAB icon scale across every chat surface.
-                fontSize: `${READER_CHAT_ROOM.fabIconFontRem * 0.5}rem`,
-                ...(fixedChromeInverseScale !== 1
-                  ? {
-                      transform: `scale(${fixedChromeInverseScale})`,
-                      transformOrigin: "bottom right",
-                    }
-                  : {}),
-              }}
-              className={[
-                "fixed inline-flex items-center justify-center rounded-full bg-[#1677ff] text-white shadow-[0_12px_28px_rgba(22,119,255,0.45)] transition hover:bg-[#0f68e8]",
-                isReaderLayout ? "" : "font-bold tracking-wide hover:scale-105",
-                stackZClass,
-              ]
-                .filter(Boolean)
-                .join(" ")}
-            >
-              <span className="font-bold tracking-wide leading-none">AI</span>
-            </button>
+      {/* ── Global styles ── */}
+      <style>{`
+        @keyframes lib-consulting-pulse {
+          0%,100% { opacity: 1; }
+          50%      { opacity: 0.4; }
+        }
+        @keyframes lib-tooltip-fade {
+          0%   { opacity: 0; transform: translateY(6px); }
+          15%  { opacity: 1; transform: translateY(0); }
+          85%  { opacity: 1; transform: translateY(0); }
+          100% { opacity: 0; transform: translateY(6px); }
+        }
+        .lib-consulting-text {
+          animation: lib-consulting-pulse 900ms ease-in-out infinite;
+        }
+        .lib-tooltip-pill {
+          animation: lib-tooltip-fade 4s ease forwards;
+        }
+        .lib-chat-scrollbar {
+          scrollbar-width: thin;
+          scrollbar-color: ${C.border} ${C.paper};
+        }
+        .lib-chat-scrollbar::-webkit-scrollbar { width: 5px; }
+        .lib-chat-scrollbar::-webkit-scrollbar-track { background: ${C.paper}; }
+        .lib-chat-scrollbar::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 3px; }
+      `}</style>
 
-            {isChatOpen && (
-              <div
+      {/* ── Collapsed bookmark tab ── */}
+      {!isChatOpen && (
+        <div style={{ position: "fixed", bottom: 32, right: 32, zIndex: 40, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }} className={stackZClass}>
+          {/* Idle tooltip */}
+          {showTooltip && (
+            <div className="lib-tooltip-pill" style={{
+              background: C.navy, color: C.paper,
+              fontFamily: fontBody, fontSize: 11, fontStyle: "italic",
+              padding: "5px 12px", borderRadius: 20,
+              pointerEvents: "none", whiteSpace: "nowrap",
+            }}>
+              Press / to open AI chat
+            </div>
+          )}
+          <button
+            onClick={openChat}
+            onMouseEnter={() => setTabHovered(true)}
+            onMouseLeave={() => setTabHovered(false)}
+            style={{
+              background: tabHovered ? C.gold : C.navy,
+              color: C.paper,
+              fontFamily: fontBody, fontSize: 13,
+              letterSpacing: "0.06em",
+              padding: "10px 20px",
+              borderRadius: "4px 4px 0 0",
+              border: "none", cursor: "pointer",
+              boxShadow: "0 -4px 16px rgba(0,0,0,0.16)",
+              display: "flex", alignItems: "center", gap: 8,
+              transform: tabHovered ? "translateY(-3px)" : "translateY(0)",
+              transition: "background 200ms, transform 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94)",
+            }}
+            title="Open AI chat (/)"
+          >
+            <BookIcon size={15} color={tabHovered ? "white" : C.gold} />
+            AI
+          </button>
+        </div>
+      )}
+
+      {/* ── Expanded chat panel ── */}
+      {isChatOpen && (
+        <div
+          style={{
+            position: "fixed", bottom: 0, right: 32,
+            width: 360, height: 500,
+            display: "flex", flexDirection: "column",
+            borderRadius: "6px 6px 0 0",
+            overflow: "hidden",
+            boxShadow: "0 -8px 40px rgba(0,0,0,0.18), 0 -2px 8px rgba(0,0,0,0.08)",
+            transform: panelVisible ? "translateY(0)" : "translateY(100%)",
+            transition: "transform 320ms cubic-bezier(0.25, 0.46, 0.45, 0.94)",
+          }}
+          className={stackZClass}
+        >
+          {/* Header */}
+          <div style={{
+            background: C.navy,
+            padding: "14px 18px 16px",
+            borderRadius: "6px 6px 0 0",
+            flexShrink: 0,
+          }}>
+            <div style={{
+              display: "flex", alignItems: "flex-start", gap: 10,
+              marginBottom: 10,
+            }}>
+              <BookIcon size={20} color={C.gold} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontFamily: fontSerif, fontSize: 15, fontWeight: 700,
+                  color: "white", lineHeight: 1.2,
+                }}>
+                  AI Assistant
+                </div>
+                <div style={{
+                  fontFamily: fontBody, fontSize: 11, fontStyle: "italic",
+                  color: "rgba(255,255,255,0.55)", marginTop: 2,
+                }}>
+                  Ask about manuals and documents
+                </div>
+              </div>
+              <button
+                onClick={() => setIsChatOpen(false)}
+                aria-label="Close chat"
                 style={{
-                  ...chatGeometry.panel,
-                  ...(fixedChromeInverseScale !== 1
-                    ? {
-                        transform: `scale(${fixedChromeInverseScale})`,
-                        transformOrigin: "bottom right",
-                      }
-                    : {}),
+                  background: "none", border: "none", cursor: "pointer",
+                  fontFamily: fontBody, fontSize: 18,
+                  color: "rgba(255,255,255,0.5)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  padding: "2px 4px",
+                  transition: "color 150ms",
+                  flexShrink: 0,
+                  marginTop: -2,
                 }}
-                className={[
-                  "fixed flex flex-col overflow-hidden border border-slate-200 bg-[#fafafc] shadow-[0_30px_80px_rgba(15,23,42,0.18)]",
-                  readerCompact ? "rounded-3xl" : "rounded-[2rem]",
-                  stackZClass,
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = "white"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.5)"; }}
               >
-                <div
-                  className={[
-                    "relative z-30 flex items-center justify-between overflow-visible border-b border-slate-200 bg-white",
-                    readerCompact ? "px-2 py-2" : "px-4 py-3.5",
-                  ].join(" ")}
+                ×
+              </button>
+            </div>
+            {/* Model picker */}
+            <div ref={modelMenuRef} style={{ position: "relative" }}>
+              <button
+                type="button"
+                id="chat-model-trigger"
+                aria-haspopup="listbox"
+                aria-expanded={isModelMenuOpen}
+                aria-label={`Model: ${selectedModelLabel}. Choose model`}
+                disabled={modelPickerDisabled}
+                onClick={() => { if (!modelPickerDisabled) setIsModelMenuOpen((o) => !o); }}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  padding: "6px 10px",
+                  fontFamily: fontBody,
+                  fontSize: 12,
+                  color: C.navy,
+                  background: C.paper,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3,
+                  cursor: modelPickerDisabled ? "not-allowed" : "pointer",
+                  opacity: modelPickerDisabled ? 0.55 : 1,
+                  transition: "border-color 150ms, box-shadow 150ms",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {selectedModelLabel}
+                </span>
+                <svg
+                  width={12}
+                  height={12}
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke={C.navy}
+                  strokeWidth={2}
+                  aria-hidden
+                  style={{
+                    transform: isModelMenuOpen ? "rotate(180deg)" : "none",
+                    transition: "transform 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94)",
+                    flexShrink: 0,
+                  }}
                 >
-                  <div className={["flex min-w-0 flex-1 items-center", readerCompact ? "gap-1.5" : "gap-2.5"].join(" ")}>
-                    <div
-                      className={[
-                        "inline-flex shrink-0 items-center justify-center rounded-lg bg-slate-700 font-bold tracking-wide text-white",
-                        readerCompact ? "h-5 px-1.5 text-[9px]" : "h-9 px-2.5 text-xs",
-                      ].join(" ")}
-                    >
-                      AI
-                    </div>
-                    <div className="min-w-0 flex-1 leading-tight">
-                      <div className="relative w-full min-w-0" ref={modelMenuRef}>
+                  <path d="M5 7.5 10 12.5 15 7.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              {isModelMenuOpen && (
+                <ul
+                  role="listbox"
+                  aria-labelledby="chat-model-trigger"
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: "calc(100% + 4px)",
+                    zIndex: 50,
+                    listStyle: "none",
+                    margin: 0,
+                    padding: "4px 0",
+                    background: C.paper,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 3,
+                    boxShadow: "0 10px 28px rgba(0,0,0,0.12)",
+                  }}
+                >
+                  {CHAT_MODEL_OPTIONS.map((option) => {
+                    const sel = option.id === selectedModelId;
+                    return (
+                      <li key={option.id} role="presentation">
                         <button
                           type="button"
-                          id="chat-model-trigger"
-                          aria-haspopup="listbox"
-                          aria-expanded={isModelMenuOpen}
-                          aria-label={`Model: ${selectedModelLabel}. Change model`}
-                          disabled={modelPickerDisabled}
+                          role="option"
+                          aria-selected={sel}
                           onClick={() => {
-                            if (!modelPickerDisabled) {
-                              setIsModelMenuOpen((open) => !open);
-                            }
+                            setSelectedModelId(option.id);
+                            setIsModelMenuOpen(false);
                           }}
-                          className={[
-                            "inline-flex max-w-full min-w-0 items-center gap-1 rounded-lg py-0.5 pl-0.5 pr-0 text-left font-semibold text-slate-900 outline-none ring-sky-500/40 transition hover:bg-slate-100 focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50",
-                            readerCompact ? "text-[11px]" : "text-sm",
-                          ].join(" ")}
+                          style={{
+                            width: "100%",
+                            padding: "7px 12px",
+                            fontFamily: fontBody,
+                            fontSize: 12,
+                            textAlign: "left",
+                            border: "none",
+                            background: sel ? "rgba(201,124,42,0.12)" : "transparent",
+                            color: C.navy,
+                            cursor: "pointer",
+                          }}
                         >
-                          <span className="min-w-0 truncate">{selectedModelLabel}</span>
-                          <svg
-                            className={[
-                              "shrink-0 text-slate-500 transition",
-                              readerCompact ? "h-3 w-3" : "h-3.5 w-3.5",
-                              isModelMenuOpen ? "rotate-180" : "",
-                            ].join(" ")}
-                            fill="none"
-                            viewBox="0 0 20 20"
-                            stroke="currentColor"
-                            strokeWidth={2.25}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden
-                          >
-                            <path d="M5 7.5 10 12.5 15 7.5" />
-                          </svg>
+                          {option.label}
                         </button>
-                        {isModelMenuOpen && (
-                          <ul
-                            role="listbox"
-                            aria-labelledby="chat-model-trigger"
-                            className="absolute left-0 top-full z-[100] mt-1.5 w-max min-w-0 max-w-[13.5rem] list-none space-y-0.5 overflow-hidden rounded-xl border border-slate-200/90 bg-white/95 p-1 shadow-[0_10px_40px_-4px_rgba(15,23,42,0.18),0_4px_16px_-4px_rgba(15,23,42,0.1)] ring-1 ring-slate-900/5 backdrop-blur-sm"
-                          >
-                            {CHAT_MODEL_OPTIONS.map((option) => {
-                              const isSelected = option.id === selectedModelId;
-                              return (
-                                <li key={option.id} role="presentation">
-                                  <button
-                                    type="button"
-                                    id={`chat-model-option-${option.id}`}
-                                    role="option"
-                                    aria-selected={isSelected}
-                                    onClick={() => {
-                                      setSelectedModelId(option.id);
-                                      setIsModelMenuOpen(false);
-                                    }}
-                                    className={[
-                                      "flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] font-medium leading-snug transition",
-                                      isSelected
-                                        ? "bg-sky-500 text-white"
-                                        : "text-slate-700 hover:bg-slate-100",
-                                    ].join(" ")}
-                                  >
-                                    <span className="min-w-0 break-words">{option.label}</span>
-                                    {isSelected && (
-                                      <svg
-                                        className="h-3.5 w-3.5 shrink-0 text-white/90"
-                                        viewBox="0 0 20 20"
-                                        fill="currentColor"
-                                        aria-hidden
-                                      >
-                                        <path
-                                          fillRule="evenodd"
-                                          d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 9.5a.75.75 0 0 1-1.106.04l-4.5-4.5a.75.75 0 1 1 1.06-1.06l3.894 3.893 7.48-8.885a.75.75 0 0 1 1.029-.04Z"
-                                          clipRule="evenodd"
-                                        />
-                                      </svg>
-                                    )}
-                                  </button>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        )}
-                      </div>
-                      <p className={readerCompact ? "text-[9px] text-emerald-600" : "text-[11px] text-emerald-600"}>Active now</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setIsChatOpen(false)}
-                    title="Close chatbot"
-                    className={[
-                      "ml-1 inline-flex shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 hover:text-slate-700",
-                      readerCompact ? "h-5 w-5 text-[10px]" : "h-7 w-7 text-xs",
-                    ].join(" ")}
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div
-                  ref={chatViewportRef}
-                  className={[
-                    "relative z-0 flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#f3f4f8]",
-                    readerCompact ? "space-y-1.5 px-2 py-2" : isReaderLayout ? "space-y-3 px-4 py-4" : "space-y-2.5 px-3 py-4",
-                  ].join(" ")}
-                >
-                  {chatMessages.map((message) => {
-                    const isTypingMessage = assistantTyping?.messageId === message.id;
-                    const isAssistant = message.role === "assistant";
-                    return (
-                      <div
-                        key={message.id}
-                        className={["flex w-full shrink-0", message.role === "user" ? "justify-end" : "justify-start"].join(" ")}
-                      >
-                        <div
-                          style={{ fontSize: `${chatFont.messagePx}px` }}
-                          className={[
-                            "w-fit max-w-[82%] leading-relaxed shadow-sm",
-                            readerCompact ? "rounded-2xl px-2 py-1.5" : "rounded-[1.25rem] px-3.5 py-2.5",
-                            message.role === "user"
-                              ? "rounded-br-md bg-[#1980ff] text-white"
-                              : "rounded-bl-md bg-[#e5e7ef] text-slate-800",
-                          ].join(" ")}
-                        >
-                          <div className="break-words">
-                            {isAssistant && isTypingMessage && !message.text ? (
-                              <span className="chat-typing-cursor-line" aria-hidden />
-                            ) : isAssistant && isTypingMessage ? (
-                              <div className="chat-typing-md">
-                                {renderMessageText(message.text, "assistant", { streamCursor: true })}
-                              </div>
-                            ) : (
-                              renderMessageText(message.text, message.role)
-                            )}
-                            {isAssistant &&
-                              !isTypingMessage &&
-                              message.referencedPages &&
-                              message.referencedPages.length > 0 && (
-                                <div
-                                  className="mt-2 flex flex-wrap gap-1.5"
-                                  style={{ fontSize: `${chatFont.referenceLinkPx}px` }}
-                                >
-                                  {message.referencedPages.map((reference) => (
-                                    <Link
-                                      key={`${message.id}-${reference.href}-${reference.label}`}
-                                      href={reference.href}
-                                      className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-slate-700 underline underline-offset-2 hover:bg-slate-100"
-                                    >
-                                      {reference.label}
-                                    </Link>
-                                  ))}
-                                </div>
-                              )}
-                          </div>
-                          {message.text.trim() !== "" &&
-                            (message.role === "user" || !isTypingMessage) && (
-                              <div
-                                className={[
-                                  "mt-1.5 flex",
-                                  message.role === "user" ? "justify-end" : "justify-start",
-                                ].join(" ")}
-                              >
-                                <MessageCopyButton
-                                  text={message.text}
-                                  variant={message.role === "user" ? "user" : "assistant"}
-                                  compact={readerCompact}
-                                />
-                              </div>
-                            )}
-                        </div>
-                      </div>
+                      </li>
                     );
                   })}
-                  {chatMutation.isPending && (
-                    <div className={readerCompact ? "flex justify-start pl-1" : "flex justify-start pl-2"}>
-                      <LoadingBlinkDot />
-                    </div>
-                  )}
-                </div>
-                <form
-                  onSubmit={submitChatMessage}
-                  className={[
-                    "border-t border-slate-100 bg-white/95 backdrop-blur",
-                    readerCompact ? "px-2 pb-2 pt-1.5" : isReaderLayout ? "px-4 pb-4 pt-3" : "px-3 pb-3.5 pt-2.5",
-                  ].join(" ")}
-                >
-                  <div
-                    className={[
-                      "group flex items-center gap-2 rounded-2xl border border-slate-200/90 bg-white shadow-sm transition focus-within:border-slate-300/80 focus-within:shadow-md focus-within:shadow-slate-900/5",
-                      readerCompact ? "min-h-[26px] px-2 py-0.5" : isReaderLayout ? "min-h-[52px] px-3 py-1.5" : "min-h-[48px] px-3 py-1",
-                    ].join(" ")}
-                  >
-                    <input
-                      value={chatInput}
-                      onChange={(event) => setChatInput(event.target.value)}
-                      placeholder="Ask about your documents…"
-                      style={{ fontSize: `${chatFont.inputTextPx}px` }}
-                      className={[
-                        "flex-1 border-0 bg-transparent py-2 leading-snug text-slate-800 outline-none ring-0 placeholder:text-slate-400 focus:outline-none focus:ring-0",
-                        readerCompact ? "min-h-[22px] py-1" : isReaderLayout ? "min-h-[44px]" : "min-h-[40px]",
-                      ].join(" ")}
-                    />
-                    <button
-                      type={isConversationRunning ? "button" : "submit"}
-                      onClick={isConversationRunning ? stopConversation : undefined}
-                      disabled={
-                        !isConversationRunning &&
-                        (!chatInput.trim() || (CHAT_MODEL_OPTIONS.length > 0 && !selectedModelId))
-                      }
-                      title={isConversationRunning ? "Stop conversation" : "Send message"}
-                      className={[
-                        "inline-flex shrink-0 items-center justify-center rounded-xl bg-sky-500 text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500",
-                        readerCompact ? "h-5 w-5" : isReaderLayout ? "h-10 w-10" : "h-9 w-9",
-                      ].join(" ")}
-                    >
-                      {isConversationRunning ? (
-                        <span className={readerCompact ? "text-[8px] font-bold" : "text-xs font-bold"} aria-hidden>
-                          ■
-                        </span>
-                      ) : (
-                        <svg
-                          className={readerCompact ? "h-2.5 w-2.5 translate-x-px" : "h-4 w-4 translate-x-px"}
-                          viewBox="0 0 24 24"
-                          fill="currentColor"
-                          aria-hidden
-                        >
-                          <path d="M3.478 2.404a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z" />
-                        </svg>
+                </ul>
+              )}
+            </div>
+          </div>
+
+          {/* Border */}
+          <div style={{ height: 1, background: C.border, flexShrink: 0 }} />
+
+          {/* Messages */}
+          <div
+            ref={chatViewportRef}
+            className="lib-chat-scrollbar"
+            style={{
+              flex: 1,
+              background: C.paper,
+              backgroundImage: "repeating-linear-gradient(0deg,transparent,transparent 24px,rgba(180,160,120,0.06) 24px,rgba(180,160,120,0.06) 25px)",
+              padding: "20px 16px",
+              overflowY: "auto",
+              scrollBehavior: "smooth",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            {chatMessages.map(message => {
+              const isTypingMessage = assistantTyping?.messageId === message.id;
+              const isAssistant = message.role === "assistant";
+
+              if (isAssistant) {
+                return (
+                  <div key={message.id} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                    <div style={{
+                      borderLeft: "2px solid " + C.gold,
+                      background: "rgba(201,124,42,0.04)",
+                      borderRadius: "0 4px 4px 0",
+                      padding: "12px 14px",
+                      fontFamily: fontBody, fontSize: 13,
+                      color: "#3a3020", lineHeight: 1.7,
+                      maxWidth: "90%",
+                    }}>
+                      <div className="break-words">
+                        {isTypingMessage && !message.text ? (
+                          <span className="chat-typing-cursor-line" aria-hidden />
+                        ) : isTypingMessage ? (
+                          <div className="chat-typing-md">
+                            {renderMessageText(message.text, "assistant", { streamCursor: true })}
+                          </div>
+                        ) : (
+                          renderMessageText(message.text, "assistant")
+                        )}
+                      </div>
+                      {!isTypingMessage && message.referencedPages && message.referencedPages.length > 0 && (
+                        <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {message.referencedPages.map(ref => (
+                            <Link
+                              key={`${message.id}-${ref.href}-${ref.label}`}
+                              href={ref.href}
+                              style={{
+                                fontFamily: fontBody, fontSize: 11,
+                                color: C.gold, textDecoration: "underline",
+                                textUnderlineOffset: 2,
+                              }}
+                            >
+                              {ref.label}
+                            </Link>
+                          ))}
+                        </div>
                       )}
-                    </button>
+                    </div>
+                    {message.text.trim() !== "" && !isTypingMessage && (
+                      <div style={{ marginTop: 4, paddingLeft: 2 }}>
+                        <MessageCopyButton text={message.text} variant="assistant" />
+                      </div>
+                    )}
                   </div>
-                </form>
-              </div>
+                );
+              }
+
+              /* User message */
+              return (
+                <div key={message.id} style={{
+                  display: "flex", flexDirection: "column", alignItems: "flex-end",
+                }}>
+                  <div style={{
+                    borderRight: "2px solid " + C.navy,
+                    padding: "8px 12px 8px 0",
+                    marginRight: 4,
+                    fontFamily: fontBody, fontSize: 13,
+                    color: C.navy, lineHeight: 1.6,
+                    maxWidth: "85%", textAlign: "right",
+                    wordBreak: "break-word",
+                  }}>
+                    {renderMessageText(message.text, "user")}
+                  </div>
+                  <div style={{ marginTop: 4, paddingRight: 8 }}>
+                    <MessageCopyButton text={message.text} variant="user" />
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* "Consulting the archive…" loading state */}
+            {chatMutation.isPending && (
+              <p className="lib-consulting-text" style={{
+                fontFamily: fontBody, fontSize: 12, fontStyle: "italic",
+                color: C.muted, margin: 0, paddingLeft: 14,
+              }}>
+                Consulting the archive…
+              </p>
             )}
+          </div>
+
+          {/* Border */}
+          <div style={{ height: 1, background: C.border, flexShrink: 0 }} />
+
+          {/* Input area */}
+          <form
+            onSubmit={submitChatMessage}
+            style={{
+              background: C.paper,
+              padding: "14px 16px",
+              display: "flex", alignItems: "center", gap: 12,
+              flexShrink: 0,
+            }}
+          >
+            <TextareaWithFocus
+              ref={textareaRef}
+              value={chatInput}
+              onChange={v => setChatInput(v)}
+              onEnterSubmit={() => {
+                if (!inputEmpty && !isConversationRunning) {
+                  const fakeEvent = { preventDefault: () => {} } as FormEvent<HTMLFormElement>;
+                  submitChatMessage(fakeEvent);
+                }
+              }}
+              placeholder="Ask about a manual or chapter…"
+              disabled={isConversationRunning}
+            />
+            <button
+              type={isConversationRunning ? "button" : "submit"}
+              onClick={isConversationRunning ? stopConversation : undefined}
+              disabled={!isConversationRunning && inputEmpty}
+              style={{
+                background: isConversationRunning
+                  ? C.gold
+                  : inputEmpty ? "#c8b89a" : C.navy,
+                color: C.paper,
+                fontFamily: fontBody, fontSize: 12,
+                letterSpacing: "0.06em",
+                border: "none", borderRadius: 3,
+                padding: "7px 14px",
+                cursor: (!isConversationRunning && inputEmpty) ? "default" : "pointer",
+                transition: "background 200ms",
+                flexShrink: 0,
+                whiteSpace: "nowrap",
+              }}
+              onMouseEnter={e => {
+                if (!isConversationRunning && !inputEmpty)
+                  (e.currentTarget as HTMLButtonElement).style.background = C.gold;
+              }}
+              onMouseLeave={e => {
+                if (!isConversationRunning && !inputEmpty)
+                  (e.currentTarget as HTMLButtonElement).style.background = C.navy;
+              }}
+            >
+              {isConversationRunning ? "Stop" : "Send"}
+            </button>
+          </form>
+        </div>
+      )}
     </>
   );
 }
 
+/* ── Textarea with focus state ── */
+function TextareaWithFocus({
+  value, onChange, onEnterSubmit, placeholder, disabled, ref: externalRef,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onEnterSubmit: () => void;
+  placeholder: string;
+  disabled?: boolean;
+  ref?: React.Ref<HTMLTextAreaElement>;
+}) {
+  const [focused, setFocused] = useState(false);
+  const internalRef = useRef<HTMLTextAreaElement>(null);
+  const refToUse = (externalRef as React.RefObject<HTMLTextAreaElement>) ?? internalRef;
+
+  return (
+    <textarea
+      ref={refToUse}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      onKeyDown={e => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          onEnterSubmit();
+        }
+      }}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      placeholder={placeholder}
+      rows={1}
+      disabled={disabled}
+      style={{
+        flex: 1,
+        fontFamily: fontBody, fontSize: 13,
+        color: C.navy,
+        border: "none",
+        borderBottom: `${focused ? "1.5px" : "1px"} solid ${focused ? C.gold : C.border}`,
+        background: "transparent",
+        resize: "none",
+        outline: "none",
+        padding: "4px 0",
+        minHeight: 28,
+        maxHeight: 80,
+        lineHeight: 1.5,
+        transition: "border-color 200ms",
+        overflow: "auto",
+      }}
+    />
+  );
+}
+
+/* Need to handle ref forwarding properly */
+TextareaWithFocus.displayName = "TextareaWithFocus";
+
+/* ── Utility functions (unchanged logic) ── */
+
 function getChatbotErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
-    const data = error.response?.data as
-      | { message?: string; error?: string; detail?: string }
-      | string
-      | undefined;
-    if (typeof data === "string" && data.trim()) {
-      return data.trim();
-    }
+    const data = error.response?.data as { message?: string; error?: string; detail?: string } | string | undefined;
+    if (typeof data === "string" && data.trim()) return data.trim();
     if (data && typeof data === "object") {
-      if (typeof data.message === "string" && data.message.trim()) {
-        return data.message.trim();
-      }
-      if (typeof data.error === "string" && data.error.trim()) {
-        return data.error.trim();
-      }
-      if (typeof data.detail === "string" && data.detail.trim()) {
-        return data.detail.trim();
-      }
+      if (typeof data.message === "string" && data.message.trim()) return data.message.trim();
+      if (typeof data.error   === "string" && data.error.trim())   return data.error.trim();
+      if (typeof data.detail  === "string" && data.detail.trim())  return data.detail.trim();
     }
     const status = error.response?.status;
     if (status) {
       const statusText = error.response?.statusText?.trim();
       return statusText ? `Request failed (${status} ${statusText})` : `Request failed (${status})`;
     }
-    if (typeof error.message === "string" && error.message.trim()) {
-      return error.message.trim();
-    }
+    if (typeof error.message === "string" && error.message.trim()) return error.message.trim();
   }
-
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
   return "Something went wrong while contacting the chatbot. Please try again.";
 }
 
 function resolveChatbotResponse(payload: unknown): { answer: string; referencedPages: ChatReferenceLink[] } {
-  if (typeof payload === "string") {
-    return { answer: payload, referencedPages: [] };
-  }
-  if (!payload || typeof payload !== "object") {
-    return { answer: "", referencedPages: [] };
-  }
-
-  const recordPayload = payload as Record<string, unknown>;
-  const directAnswer = recordPayload.answer;
-  const directMessage = recordPayload.message;
-  const directResponse = recordPayload.response;
+  if (typeof payload === "string") return { answer: payload, referencedPages: [] };
+  if (!payload || typeof payload !== "object") return { answer: "", referencedPages: [] };
+  const r = payload as Record<string, unknown>;
   const answer =
-    (typeof directAnswer === "string" && directAnswer) ||
-    (typeof directMessage === "string" && directMessage) ||
-    (typeof directResponse === "string" && directResponse) ||
-    "";
-
-  const directReferencedPages = normalizeReferencedPages(recordPayload.referencedPages);
-  if (directReferencedPages.length > 0) {
-    return { answer, referencedPages: directReferencedPages };
-  }
-
-  const data = recordPayload.data;
+    (typeof r.answer   === "string" && r.answer)   ||
+    (typeof r.message  === "string" && r.message)  ||
+    (typeof r.response === "string" && r.response) || "";
+  const directPages = normalizeReferencedPages(r.referencedPages);
+  if (directPages.length > 0) return { answer, referencedPages: directPages };
+  const data = r.data;
   if (data && typeof data === "object") {
-    const nestedData = data as Record<string, unknown>;
+    const n = data as Record<string, unknown>;
     const nestedAnswer =
-      (typeof nestedData.answer === "string" && nestedData.answer) ||
-      (typeof nestedData.message === "string" && nestedData.message) ||
-      (typeof nestedData.response === "string" && nestedData.response) ||
-      answer;
-    const nestedReferencedPages = normalizeReferencedPages(nestedData.referencedPages);
-    return { answer: nestedAnswer, referencedPages: nestedReferencedPages };
+      (typeof n.answer   === "string" && n.answer)   ||
+      (typeof n.message  === "string" && n.message)  ||
+      (typeof n.response === "string" && n.response) || answer;
+    return { answer: nestedAnswer, referencedPages: normalizeReferencedPages(n.referencedPages) };
   }
-
   return { answer, referencedPages: [] };
 }
 
 function normalizeReferencedPages(value: unknown): ChatReferenceLink[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map((entry, index) => toReferenceLink(entry, index))
-    .filter((entry): entry is ChatReferenceLink => entry !== null);
+  if (!Array.isArray(value)) return [];
+  return value.map((entry, i) => toReferenceLink(entry, i)).filter((e): e is ChatReferenceLink => e !== null);
 }
 
 function toReferenceLink(entry: unknown, index: number): ChatReferenceLink | null {
-  if (!entry || typeof entry !== "object") {
-    return null;
-  }
-
-  const record = entry as Record<string, unknown>;
-  const hrefCandidate = record.href ?? record.url ?? record.link;
+  if (!entry || typeof entry !== "object") return null;
+  const r = entry as Record<string, unknown>;
+  const hrefCandidate = r.href ?? r.url ?? r.link;
   if (typeof hrefCandidate === "string" && hrefCandidate.trim()) {
     return {
-      href: hrefCandidate,
-      label: typeof record.label === "string" && record.label.trim() ? record.label : `Reference ${index + 1}`,
+      href:  hrefCandidate,
+      label: typeof r.label === "string" && r.label.trim() ? r.label : `Reference ${index + 1}`,
     };
   }
-
-  const fileIdCandidate = record.fileId ?? record.file_id ?? record.id;
-  if (typeof fileIdCandidate !== "string" || !fileIdCandidate.trim()) {
-    return null;
-  }
-
-  const pageCandidate = record.page ?? record.pageNumber;
+  const fileIdCandidate = r.fileId ?? r.file_id ?? r.id;
+  if (typeof fileIdCandidate !== "string" || !fileIdCandidate.trim()) return null;
+  const pageCandidate = r.page ?? r.pageNumber;
   const pageNumber =
-    typeof pageCandidate === "number" && Number.isFinite(pageCandidate)
-      ? pageCandidate
-      : typeof pageCandidate === "string" && pageCandidate.trim() && Number.isFinite(Number(pageCandidate))
-        ? Number(pageCandidate)
-        : null;
-
+    typeof pageCandidate === "number" && Number.isFinite(pageCandidate) ? pageCandidate :
+    typeof pageCandidate === "string" && pageCandidate.trim() && Number.isFinite(Number(pageCandidate)) ? Number(pageCandidate) : null;
   const params = new URLSearchParams();
-  if (pageNumber && pageNumber > 0) {
-    params.set("page", String(pageNumber));
-  }
+  if (pageNumber && pageNumber > 0) params.set("page", String(pageNumber));
   const href = params.toString() ? `/files/${fileIdCandidate}?${params.toString()}` : `/files/${fileIdCandidate}`;
-  const filename = typeof record.filename === "string" ? record.filename.trim() : "";
+  const filename = typeof r.filename === "string" ? r.filename.trim() : "";
   const label =
-    typeof record.label === "string" && record.label.trim()
-      ? record.label
-      : filename
-        ? pageNumber
-          ? `${filename} - Page ${pageNumber}`
-          : filename
-        : pageNumber
-          ? `Page ${pageNumber}`
-          : `Reference ${index + 1}`;
-
+    typeof r.label === "string" && r.label.trim() ? r.label :
+    filename ? (pageNumber ? `${filename} - Page ${pageNumber}` : filename) :
+    pageNumber ? `Page ${pageNumber}` : `Reference ${index + 1}`;
   return { href, label };
 }
 
-function ClipboardCopyIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-      />
-    </svg>
-  );
-}
-
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-    </svg>
-  );
-}
-
-function MessageCopyButton({
-  text,
-  variant,
-  compact = false,
-}: {
-  text: string;
-  variant: "user" | "assistant";
-  compact?: boolean;
-}) {
-  const [copied, setCopied] = useState(false);
-  const isUser = variant === "user";
-
-  useEffect(() => {
-    if (!copied) {
-      return;
-    }
-    const t = window.setTimeout(() => setCopied(false), 1800);
-    return () => window.clearTimeout(t);
-  }, [copied]);
-
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  };
-
-  const label = copied ? "Copied" : "Copy message";
-
-  return (
-    <button
-      type="button"
-      onClick={() => void onCopy()}
-      aria-label={label}
-      title={label}
-      className={[
-        "inline-flex shrink-0 items-center justify-center rounded-md transition",
-        compact ? "h-4 w-4" : "h-7 w-7",
-        isUser
-          ? copied
-            ? "text-emerald-200"
-            : "text-white/85 hover:text-white"
-          : copied
-            ? "text-emerald-700"
-            : "text-slate-500 hover:text-slate-800",
-      ].join(" ")}
-    >
-      {copied ? (
-        <CheckIcon className={compact ? "h-3 w-3" : "h-4 w-4"} />
-      ) : (
-        <ClipboardCopyIcon className={compact ? "h-3 w-3" : "h-4 w-4"} />
-      )}
-    </button>
-  );
-}
-
+/* ── renderMessageText (unchanged) ── */
 function renderMessageText(
-  text: string,
-  role: ChatMessage["role"],
-  options?: { streamCursor?: boolean }
+  text: string, role: ChatMessage["role"], options?: { streamCursor?: boolean }
 ): ReactNode {
   const { streamCursor = false } = options ?? {};
   const isUser = role === "user";
@@ -824,7 +843,7 @@ function renderMessageText(
         h1: ({ children }) => <h1 className="mb-2 text-lg font-bold leading-snug last:mb-0">{children}</h1>,
         h2: ({ children }) => <h2 className="mb-2 text-base font-bold leading-snug last:mb-0">{children}</h2>,
         h3: ({ children }) => <h3 className="mb-2 text-sm font-semibold leading-snug last:mb-0">{children}</h3>,
-        p: ({ children }) => <p className="mb-2 whitespace-pre-wrap break-words leading-relaxed last:mb-0">{children}</p>,
+        p:  ({ children }) => <p className="mb-2 whitespace-pre-wrap break-words leading-relaxed last:mb-0">{children}</p>,
         ul: ({ children }) => <ul className="mb-2 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>,
         ol: ({ children }) => <ol className="mb-2 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>,
         li: ({ children }) => <li>{children}</li>,
@@ -832,9 +851,7 @@ function renderMessageText(
         code: ({ children, className }) => {
           const codeText = String(children).replace(/\n$/, "");
           const isBlockCode = Boolean(className) || codeText.includes("\n");
-          if (isBlockCode) {
-            return <ChatCodeBlock codeText={codeText} role={role} />;
-          }
+          if (isBlockCode) return <ChatCodeBlock codeText={codeText} role={role} />;
           return <code className={inlineCodeClass}>{children}</code>;
         },
         pre: ({ children }) => <>{children}</>,
@@ -845,73 +862,84 @@ function renderMessageText(
   );
 }
 
+/* ── ChatCodeBlock (unchanged) ── */
 function ChatCodeBlock({ codeText, role }: { codeText: string; role: ChatMessage["role"] }) {
   const [copied, setCopied] = useState(false);
   const isUser = role === "user";
 
   useEffect(() => {
-    if (!copied) {
-      return;
-    }
-    const timer = window.setTimeout(() => setCopied(false), 1200);
-    return () => window.clearTimeout(timer);
+    if (!copied) return;
+    const t = window.setTimeout(() => setCopied(false), 1200);
+    return () => window.clearTimeout(t);
   }, [copied]);
 
   const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(codeText);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
+    try { await navigator.clipboard.writeText(codeText); setCopied(true); }
+    catch { setCopied(false); }
   };
 
   return (
-    <div
-      className={[
-        "mb-2 rounded-lg border p-2.5 font-mono text-[12px] leading-relaxed last:mb-0",
-        isUser ? "border-blue-300/40 bg-blue-500/55 text-white" : "border-slate-300 bg-white/75 text-slate-800",
-      ].join(" ")}
-    >
+    <div className={[
+      "mb-2 rounded-lg border p-2.5 font-mono text-[12px] leading-relaxed last:mb-0",
+      isUser ? "border-blue-300/40 bg-blue-500/55 text-white" : "border-slate-300 bg-white/75 text-slate-800",
+    ].join(" ")}>
       <div className="mb-2 flex justify-end">
-        <button
-          type="button"
-          onClick={() => void onCopy()}
-          aria-label={copied ? "Copied" : "Copy code"}
-          title={copied ? "Copied" : "Copy"}
-          className={[
-            "inline-flex h-8 w-8 items-center justify-center rounded-md transition",
+        <button type="button" onClick={() => void onCopy()}
+          aria-label={copied ? "Copied" : "Copy code"} title={copied ? "Copied" : "Copy"}
+          className={["inline-flex h-8 w-8 items-center justify-center rounded-md transition",
             copied ? "bg-emerald-600 text-white" : "bg-black text-white hover:bg-slate-800",
-          ].join(" ")}
-        >
+          ].join(" ")}>
           {copied ? <CheckIcon className="h-4 w-4" /> : <ClipboardCopyIcon className="h-4 w-4" />}
         </button>
       </div>
-      <pre className="overflow-x-auto">
-        <code>{codeText}</code>
-      </pre>
+      <pre className="overflow-x-auto"><code>{codeText}</code></pre>
     </div>
   );
 }
 
-function LoadingBlinkDot() {
-  const [isVisible, setIsVisible] = useState(true);
+/* ── MessageCopyButton (unchanged) ── */
+function MessageCopyButton({ text, variant }: { text: string; variant: "user" | "assistant" }) {
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      setIsVisible((previous) => !previous);
-    }, 420);
-    return () => window.clearInterval(timer);
-  }, []);
+    if (!copied) return;
+    const t = window.setTimeout(() => setCopied(false), 1800);
+    return () => window.clearTimeout(t);
+  }, [copied]);
 
+  const onCopy = async () => {
+    try { await navigator.clipboard.writeText(text); setCopied(true); }
+    catch { setCopied(false); }
+  };
+
+  const label = copied ? "Copied" : "Copy message";
   return (
-    <div className="flex items-center py-1">
-      <span
-        className={[
-          "h-2.5 w-2.5 rounded-full bg-slate-500 transition-opacity duration-200",
-          isVisible ? "opacity-100" : "opacity-15",
-        ].join(" ")}
-      />
-    </div>
+    <button type="button" onClick={() => void onCopy()} aria-label={label} title={label}
+      style={{
+        background: "none", border: "none", cursor: "pointer",
+        color: copied ? "#2d6a3a" : C.muted,
+        padding: 0, display: "inline-flex", alignItems: "center",
+        transition: "color 150ms",
+      }}>
+      {copied ? <CheckIcon className="h-3 w-3" /> : <ClipboardCopyIcon className="h-3 w-3" />}
+    </button>
   );
 }
+
+function ClipboardCopyIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+    </svg>
+  );
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+

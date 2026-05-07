@@ -67,51 +67,41 @@ export function Navbar() {
           display: "flex", alignItems: "center", justifyContent: "space-between",
         }}
       >
-        {/* ── Left: IMME wordmark ── */}
-        <Link href="/" style={{ textDecoration: "none" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            <span style={{
-              fontFamily: fontSerif, fontSize: 18, fontWeight: 700,
-              color: C.navy, lineHeight: 1.1, letterSpacing: "-0.01em",
-            }}>
-              IMME
-            </span>
-            <span style={{
-              fontFamily: fontBody, fontSize: 10,
-              color: C.muted, letterSpacing: "0.09em", lineHeight: 1,
-            }}>
-              Uganda Expressways
-            </span>
-          </div>
+        {/* ── Left: product title (links to folder dashboard) ── */}
+        <Link href="/dashboard" style={{ textDecoration: "none" }}>
+          <span style={{
+            fontFamily: fontSerif, fontSize: 17, fontWeight: 700,
+            color: C.navy, lineHeight: 1.2, letterSpacing: "-0.01em",
+            maxWidth: 280,
+          }}>
+            Expressway Integrated Manual
+          </span>
         </Link>
 
-        {/* ── Right: search icon + avatar pill + logout ── */}
+        {/* ── Right: dashboard + avatar menu + logout ── */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
 
-          {/* Search focus shortcut */}
-          <button
-            type="button"
-            onClick={() => {
-              const el = document.getElementById("globalSearch");
-              if (el) { el.focus(); el.scrollIntoView({ behavior: "smooth", block: "center" }); }
-            }}
+          <Link
+            href="/dashboard"
             style={{
-              background: "none", border: "none", cursor: "pointer",
-              padding: "6px 8px", color: C.navy, opacity: 0.65,
-              display: "flex", alignItems: "center",
-              borderRadius: 4, transition: "opacity 150ms",
+              fontFamily: fontBody, fontSize: 13,
+              color: C.navy, textDecoration: "none",
+              padding: "6px 14px",
+              border: `1px solid ${C.navy}`,
+              borderRadius: 4,
+              transition: "background 200ms, color 200ms",
             }}
-            aria-label="Focus search bar"
-            title="Search"
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.65"; }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLAnchorElement).style.background = C.navy;
+              (e.currentTarget as HTMLAnchorElement).style.color = "white";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLAnchorElement).style.background = "transparent";
+              (e.currentTarget as HTMLAnchorElement).style.color = C.navy;
+            }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth="2" aria-hidden>
-              <circle cx="11" cy="11" r="8" />
-              <path d="m21 21-4.35-4.35" />
-            </svg>
-          </button>
+            Dashboard
+          </Link>
 
           {/* Avatar pill with dropdown */}
           <div ref={dropdownRef} style={{ position: "relative" }}>

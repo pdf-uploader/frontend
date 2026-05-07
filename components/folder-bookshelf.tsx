@@ -1,0 +1,719 @@
+"use client";
+
+/**
+ * 3D bookshelf components for the folder interior page.
+ *
+ * PDF thumbnails are rendered lazily via IntersectionObserver:
+ *   1. Book enters viewport → fetch presigned URL → render first page with PDF.js
+ *   2. Thumbnail is cached in sessionStorage keyed by file.id
+ *   3. Placeholder cover (spine color + title text) shown while loading / on error
+ */
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { pdfjs } from "react-pdf";
+import { getPdfViewerPresignedUrl } from "@/lib/api";
+import type { FolderFile } from "@/lib/types";
+
+// Same worker CDN already used in pdf-viewer.tsx
+pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+
+// ─── Design tokens ────────────────────────────────────────────────────────────
+
+const C = {
+  navy:    "#1a2744",
+  gold:    "#c97c2a",
+  paper:   "#faf8f3",
+  border:  "#d0c4aa",
+  muted:   "#8a7a60",
+  textMid: "#6a5a40",
+  dark:    "#3a3020",
+};
+
+const SPINE_COLORS = [
+  "#1a2744", // navy
+  "#2d4a3e", // forest
+  "#4a2c2a", // burgundy
+  "#3a2c1a", // dark umber
+  "#1e3a5f", // deep blue
+  "#2e3a28", // dark moss
+];
+
+const fontSerif   = "'Source Serif 4', Georgia, serif";
+const fontDisplay = "'Playfair Display', 'Times New Roman', serif";
+
+const BOOKS_PER_SHELF = 5;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function getSpineColor(filename: string): string {
+  let h = 0;
+  for (let i = 0; i < filename.length; i++) {
+    h = ((h << 5) - h) + filename.charCodeAt(i);
+    h |= 0;
+  }
+  return SPINE_COLORS[Math.abs(h) % SPINE_COLORS.length];
+}
+
+function getVerticalJitter(filename: string): number {
+  return (filename.charCodeAt(0) % 7) - 3; // –3 … +3 px, stable per filename
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString("en-US", {
+      year: "numeric", month: "short", day: "numeric",
+    });
+  } catch {
+    return "";
+  }
+}
+
+async function renderPdfThumbnail(pdfUrl: string, fileId: string): Promise<string> {
+  const CACHE_KEY = `pdf-thumb-${fileId}`;
+  try {
+    const cached = sessionStorage.getItem(CACHE_KEY);
+    if (cached) return cached;
+  } catch { /* sessionStorage unavailable */ }
+
+  const task = pdfjs.getDocument({ url: pdfUrl });
+  const pdf  = await task.promise;
+  const page = await pdf.getPage(1);
+
+  const viewport       = page.getViewport({ scale: 1 });
+  const scale          = 160 / viewport.width;
+  const scaledViewport = page.getViewport({ scale });
+
+  const canvas = document.createElement("canvas");
+  canvas.width  = scaledViewport.width;
+  canvas.height = scaledViewport.height;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("No canvas context");
+
+  await page.render({ canvas, canvasContext: ctx, viewport: scaledViewport }).promise;
+  await pdf.destroy();
+
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+  try { sessionStorage.setItem(CACHE_KEY, dataUrl); } catch { /* quota */ }
+  return dataUrl;
+}
+
+// ─── Book3D ────────────────────────────────────────────────────────────────────
+
+type ThumbState = { phase: "idle" | "loading" | "ready" | "error"; dataUrl?: string };
+
+function Book3D({
+  file,
+  isAdmin,
+  folderLocked,
+  searchQuery,
+  onDelete,
+  adjacentShift = 0,
+}: {
+  file: FolderFile;
+  isAdmin: boolean;
+  folderLocked: boolean;
+  searchQuery: string;
+  onDelete: (id: string) => void;
+  adjacentShift?: number;
+}) {
+  const router    = useRouter();
+  const bookRef   = useRef<HTMLDivElement>(null);
+  const timerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [thumb,      setThumb]      = useState<ThumbState>({ phase: "idle" });
+  const [hovered,    setHovered]    = useState(false);
+  const [showTip,    setShowTip]    = useState(false);
+  const [departing,  setDeparting]  = useState(false);
+
+  const spineColor  = getSpineColor(file.filename);
+  const jitter      = getVerticalJitter(file.filename);
+  const displayName = file.filename.replace(/\.pdf$/i, "");
+  const openVolume = !folderLocked || isAdmin;
+  const matches     = !searchQuery.trim() ||
+    file.filename.toLowerCase().includes(searchQuery.toLowerCase());
+
+  const loadThumb = useCallback(async () => {
+    if (thumb.phase !== "idle") return;
+    setThumb({ phase: "loading" });
+    try {
+      const { url } = await getPdfViewerPresignedUrl(file.id);
+      const dataUrl  = await renderPdfThumbnail(url, file.id);
+      setThumb({ phase: "ready", dataUrl });
+    } catch {
+      setThumb({ phase: "error" });
+    }
+  }, [file.id, thumb.phase]);
+
+  // Lazy-load when book enters the viewport
+  useEffect(() => {
+    const el = bookRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          void loadThumb();
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "100px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadThumb]);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
+
+  const handleMouseEnter = () => {
+    setHovered(true);
+    timerRef.current = setTimeout(() => setShowTip(true), 400);
+  };
+  const handleMouseLeave = () => {
+    setHovered(false);
+    setShowTip(false);
+    if (timerRef.current) clearTimeout(timerRef.current);
+  };
+  const handleClick = () => {
+    if (departing) return;
+    setDeparting(true);
+    setTimeout(() => router.push(`/files/${file.id}`), 200);
+  };
+
+  // ── Render ──
+  const bookTransform = departing
+    ? "perspective(800px) rotateY(8deg) translateY(-40px) scale(0.96)"
+    : hovered
+    ? "perspective(800px) rotateY(4deg) translateY(-12px) translateZ(16px)"
+    : "perspective(800px) rotateY(8deg)";
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        opacity:   matches ? 1 : 0.2,
+        transform: `translateY(${jitter}px)${adjacentShift ? ` translateX(${adjacentShift}px)` : ""}${!matches ? " scale(0.95)" : ""}`,
+        transition: "opacity 250ms ease, transform 250ms ease",
+      }}
+    >
+      {/* ── Tooltip ── */}
+      {showTip && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            bottom: "calc(100% + 12px)",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 100,
+            background: C.paper,
+            border: `1px solid ${C.border}`,
+            borderRadius: 4,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.10)",
+            padding: "8px 12px",
+            minWidth: 160,
+            maxWidth: 220,
+            pointerEvents: "none",
+            animation: "bookTipIn 150ms ease forwards",
+          }}
+        >
+          <p style={{
+            fontFamily: fontSerif, fontSize: 13, color: C.navy,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            marginBottom: 3,
+          }}>
+            {file.filename}
+          </p>
+          <p style={{ fontFamily: fontSerif, fontSize: 11, color: C.muted }}>
+            {formatDate(file.createdAt) ? `Added: ${formatDate(file.createdAt)}  ·  ` : ""}
+            Click to read
+          </p>
+        </div>
+      )}
+
+      {/* ── 3D Book ── */}
+      <div
+        ref={bookRef}
+        onClick={handleClick}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        role="button"
+        tabIndex={0}
+        aria-label={`Open ${file.filename}`}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleClick(); } }}
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          cursor: "pointer",
+          userSelect: "none",
+          transformStyle: "preserve-3d",
+          transform: bookTransform,
+          filter: hovered
+            ? "drop-shadow(6px 20px 28px rgba(0,0,0,0.32))"
+            : "drop-shadow(4px 8px 16px rgba(0,0,0,0.22))",
+          opacity: departing ? 0 : 1,
+          transition: departing
+            ? "transform 200ms ease-in, opacity 200ms ease-in"
+            : "transform 300ms cubic-bezier(0.25,0.46,0.45,0.94), filter 300ms ease, opacity 200ms ease",
+        }}
+      >
+        {/* ── Spine ── */}
+        <div style={{
+          width: 22, height: 185,
+          borderRadius: "3px 0 0 3px",
+          background: openVolume
+            ? "linear-gradient(145deg,#f2ebe0 0%,#e4d9c8 50%,#d8ccb8 100%)"
+            : spineColor,
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          position: "relative", flexShrink: 0,
+          boxShadow: openVolume
+            ? "inset -2px 0 6px rgba(26,39,68,0.08)"
+            : "inset -2px 0 6px rgba(0,0,0,0.2)",
+          border: openVolume ? `1px solid rgba(26,39,68,0.12)` : "none",
+          borderRight: "none",
+        }}>
+          <div style={{
+            position: "absolute", top: 18, left: 3, right: 3,
+            height: 2,
+            background: openVolume ? "rgba(201,124,42,0.45)" : C.gold,
+            borderRadius: 1,
+          }} />
+          <span style={{
+            writingMode: "vertical-rl",
+            transform: "rotate(180deg)",
+            fontFamily: fontDisplay,
+            fontSize: 8,
+            color: openVolume ? C.navy : "rgba(255,255,255,0.7)",
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            maxHeight: 140,
+            textOverflow: "ellipsis",
+            padding: "0 3px",
+            opacity: openVolume ? 0.85 : 1,
+          }}>
+            {displayName}
+          </span>
+        </div>
+
+        {/* ── Cover face ── */}
+        <div style={{
+          width: 130, height: 185,
+          borderRadius: "0 3px 3px 0",
+          overflow: "hidden",
+          position: "relative",
+          background: openVolume
+            ? "linear-gradient(165deg,#faf8f3 0%,#efe6d8 55%,#e5dccf 100%)"
+            : spineColor,
+          flexShrink: 0,
+          border: openVolume ? `1px solid rgba(26,39,68,0.1)` : "none",
+          borderLeft: "none",
+        }}>
+          {/* Thumbnail */}
+          {thumb.phase === "ready" && thumb.dataUrl ? (
+            <img
+              src={thumb.dataUrl}
+              alt={file.filename}
+              style={{
+                position: "absolute", inset: 0,
+                width: "100%", height: "100%",
+                objectFit: "cover", objectPosition: "top center",
+                display: "block",
+              }}
+            />
+          ) : (
+            <div style={{
+              position: "absolute", inset: 0,
+              display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center",
+              padding: "12px 10px",
+              background: openVolume
+                ? `repeating-linear-gradient(0deg,transparent,transparent 11px,rgba(180,160,120,0.07) 11px,rgba(180,160,120,0.07) 12px),
+                   linear-gradient(165deg,#faf8f3 0%,#efe6d8 100%)`
+                : spineColor,
+              boxShadow: openVolume ? "inset 0 0 0 1px rgba(201,124,42,0.25)" : "none",
+            }}>
+              <div style={{
+                width: 28, height: 1.5,
+                background: openVolume ? C.gold : C.gold,
+                marginBottom: 10, borderRadius: 1,
+                opacity: openVolume ? 0.75 : 1,
+              }} />
+              <p style={{
+                fontFamily: fontDisplay, fontSize: 10,
+                color: openVolume ? C.dark : "rgba(255,255,255,0.82)",
+                textAlign: "center", lineHeight: 1.4,
+                letterSpacing: "0.04em", wordBreak: "break-word",
+              }}>
+                {displayName}
+              </p>
+            </div>
+          )}
+
+          <div style={{
+            position: "absolute", bottom: 0, left: 0, right: 0,
+            padding: "20px 10px 8px",
+            background: openVolume
+              ? "linear-gradient(0deg, rgba(244,241,236,0.97) 0%, transparent 100%)"
+              : "linear-gradient(0deg, rgba(10,18,40,0.88) 0%, transparent 100%)",
+            pointerEvents: "none",
+          }}>
+            <p style={{
+              fontFamily: fontSerif, fontSize: 9,
+              color: openVolume ? C.dark : "rgba(255,255,255,0.85)",
+              letterSpacing: "0.04em", lineHeight: 1.4,
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}>
+              {displayName}
+            </p>
+          </div>
+
+          {/* Stacked pages on right edge */}
+          <div style={{
+            position: "absolute", top: 0, right: 0, bottom: 0, width: 4,
+            background: openVolume
+              ? "repeating-linear-gradient(0deg,#f0e8da,#f0e8da 2px,#e2d6c4 2px,#e2d6c4 3px)"
+              : "repeating-linear-gradient(0deg,#f0e8d8,#f0e8d8 2px,#e0d4c0 2px,#e0d4c0 3px)",
+            pointerEvents: "none",
+          }} />
+
+          {/* Loading shimmer */}
+          {thumb.phase === "loading" && (
+            <div style={{
+              position: "absolute", inset: 0, overflow: "hidden",
+              pointerEvents: "none",
+            }}>
+              <div style={{
+                position: "absolute", inset: 0,
+                background: "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 50%, transparent 100%)",
+                animation: "bookShimmer 1.5s infinite",
+              }} />
+            </div>
+          )}
+
+          {/* Admin delete × — allowed even when folder is locked */}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDelete(file.id); }}
+              style={{
+                position: "absolute", bottom: 6, right: 6,
+                width: 20, height: 20,
+                borderRadius: "50%",
+                background: "rgba(0,0,0,0.4)",
+                border: "none", color: "#fff",
+                fontSize: 14, fontWeight: "bold",
+                cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                opacity: hovered ? 1 : 0,
+                transition: "opacity 150ms ease",
+                lineHeight: 1, padding: 0,
+                zIndex: 10,
+              }}
+              title="Delete file"
+              aria-label={`Delete ${file.filename}`}
+            >
+              ×
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ShelfRow ──────────────────────────────────────────────────────────────────
+
+function ShelfRow({
+  files,
+  isAdmin,
+  folderLocked,
+  searchQuery,
+  onDelete,
+}: {
+  files: FolderFile[];
+  isAdmin: boolean;
+  folderLocked: boolean;
+  searchQuery: string;
+  onDelete: (id: string) => void;
+}) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  return (
+    <div style={{ marginBottom: 48 }}>
+      <div style={{
+        display: "flex", flexDirection: "row",
+        alignItems: "flex-end",
+        gap: 20,
+        paddingLeft: 12, paddingRight: 12, paddingBottom: 0,
+      }}>
+        {files.map((file, idx) => (
+          <div
+            key={file.id}
+            onMouseEnter={() => setHoveredIdx(idx)}
+            onMouseLeave={() => setHoveredIdx(null)}
+          >
+            <Book3D
+              file={file}
+              isAdmin={isAdmin}
+              folderLocked={folderLocked}
+              searchQuery={searchQuery}
+              onDelete={onDelete}
+              adjacentShift={
+                hoveredIdx !== null
+                  ? idx === hoveredIdx - 1 ? -6
+                  : idx === hoveredIdx + 1 ? 6
+                  : 0
+                  : 0
+              }
+            />
+          </div>
+        ))}
+      </div>
+      {/* Wooden shelf board */}
+      <div style={{
+        height: 20,
+        background: "linear-gradient(180deg, #c8a87a 0%, #a07848 40%, #8a6030 100%)",
+        borderRadius: "0 0 6px 6px",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.28), inset 0 -3px 6px rgba(0,0,0,0.18), inset 0 2px 4px rgba(200,168,122,0.4)",
+      }} />
+    </div>
+  );
+}
+
+// ─── EmptyShelf ────────────────────────────────────────────────────────────────
+
+function EmptyShelf() {
+  return (
+    <div style={{ marginBottom: 48 }}>
+      <div style={{
+        display: "flex", alignItems: "flex-end", justifyContent: "center",
+        height: 185, paddingBottom: 16,
+      }}>
+        <p style={{
+          fontFamily: fontSerif, fontSize: 14,
+          fontStyle: "italic", color: C.muted,
+        }}>
+          📖&ensp;No volumes yet. Drop a PDF above to add the first one.
+        </p>
+      </div>
+      <div style={{
+        height: 20,
+        background: "linear-gradient(180deg, #c8a87a 0%, #a07848 40%, #8a6030 100%)",
+        borderRadius: "0 0 6px 6px",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.28), inset 0 -3px 6px rgba(0,0,0,0.18), inset 0 2px 4px rgba(200,168,122,0.4)",
+      }} />
+    </div>
+  );
+}
+
+// ─── SmallThumb ────────────────────────────────────────────────────────────────
+
+function SmallThumb({ file, folderLocked = true }: { file: FolderFile; folderLocked?: boolean }) {
+  const ref   = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState<ThumbState>({ phase: "idle" });
+
+  const loadThumb = useCallback(async () => {
+    if (thumb.phase !== "idle") return;
+    setThumb({ phase: "loading" });
+    try {
+      const { url } = await getPdfViewerPresignedUrl(file.id);
+      const dataUrl  = await renderPdfThumbnail(url, file.id);
+      setThumb({ phase: "ready", dataUrl });
+    } catch {
+      setThumb({ phase: "error" });
+    }
+  }, [file.id, thumb.phase]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries[0]?.isIntersecting) { void loadThumb(); observer.disconnect(); } },
+      { rootMargin: "60px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadThumb]);
+
+  const spineColor = getSpineColor(file.filename);
+  const openVolume = !folderLocked;
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        width: 32, height: 45,
+        borderRadius: 2,
+        overflow: "hidden",
+        flexShrink: 0,
+        background: openVolume
+          ? "linear-gradient(145deg,#f2ebe0,#e4d9c8)"
+          : spineColor,
+        position: "relative",
+        border: openVolume ? `1px solid rgba(26,39,68,0.12)` : "none",
+      }}
+    >
+      {thumb.phase === "ready" && thumb.dataUrl ? (
+        <img
+          src={thumb.dataUrl}
+          alt=""
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top", display: "block" }}
+        />
+      ) : (
+        <div style={{
+          width: "100%", height: "100%",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{ width: 12, height: 1, background: C.gold, opacity: openVolume ? 0.65 : 1 }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ListView ──────────────────────────────────────────────────────────────────
+
+export function ListView({
+  files,
+  searchQuery,
+  isAdmin,
+  folderLocked,
+  onDelete,
+}: {
+  files: FolderFile[];
+  searchQuery: string;
+  isAdmin: boolean;
+  folderLocked: boolean;
+  onDelete: (id: string) => void;
+}) {
+  const router = useRouter();
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  const filtered = files.filter(f =>
+    !searchQuery.trim() || f.filename.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  if (filtered.length === 0) {
+    return (
+      <p style={{ fontFamily: fontSerif, fontSize: 14, fontStyle: "italic", color: C.muted, padding: "24px 0" }}>
+        No volumes match your search.
+      </p>
+    );
+  }
+
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, overflow: "hidden" }}>
+      {filtered.map((file, idx) => (
+        <div
+          key={file.id}
+          onMouseEnter={() => setHoveredId(file.id)}
+          onMouseLeave={() => setHoveredId(null)}
+          style={{
+            display: "flex", alignItems: "center", gap: 16,
+            padding: "12px 16px",
+            borderBottom: idx < filtered.length - 1 ? `1px solid ${C.border}` : "none",
+            background: hoveredId === file.id ? "rgba(201,124,42,0.04)" : "#fff",
+            transition: "background 150ms ease",
+            cursor: "pointer",
+          }}
+          onClick={() => router.push(`/files/${file.id}`)}
+        >
+          <SmallThumb file={file} folderLocked={folderLocked && !isAdmin} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{
+              fontFamily: fontSerif, fontSize: 14, color: C.navy,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {file.filename}
+            </p>
+            <p style={{ fontFamily: fontSerif, fontSize: 11, color: C.muted, marginTop: 2 }}>
+              {formatDate(file.createdAt)}
+            </p>
+          </div>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDelete(file.id); }}
+              style={{
+                width: 24, height: 24, borderRadius: "50%",
+                background: hoveredId === file.id ? "rgba(0,0,0,0.08)" : "transparent",
+                border: "none", color: C.muted,
+                fontSize: 16, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "background 150ms ease",
+                opacity: hoveredId === file.id ? 1 : 0,
+              }}
+              title="Delete file"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── BookshelfView (main export) ───────────────────────────────────────────────
+
+export function BookshelfView({
+  files,
+  isAdmin,
+  folderLocked,
+  searchQuery,
+  onDelete,
+}: {
+  files: FolderFile[];
+  isAdmin: boolean;
+  folderLocked: boolean;
+  searchQuery: string;
+  onDelete: (id: string) => void;
+}) {
+  const rows: FolderFile[][] = [];
+  for (let i = 0; i < Math.max(files.length, 1); i += BOOKS_PER_SHELF) {
+    rows.push(files.slice(i, i + BOOKS_PER_SHELF));
+  }
+
+  return (
+    <>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Source+Serif+4:ital,wght@0,300;0,400;1,300&display=swap"
+      />
+      <div>
+        {files.length === 0 ? (
+          <EmptyShelf />
+        ) : (
+          rows.map((rowFiles, rowIdx) => (
+            <ShelfRow
+              key={rowIdx}
+              files={rowFiles}
+              isAdmin={isAdmin}
+              folderLocked={folderLocked}
+              searchQuery={searchQuery}
+              onDelete={onDelete}
+            />
+          ))
+        )}
+      </div>
+      <style>{`
+        @keyframes bookTipIn {
+          from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+          to   { opacity: 1; transform: translateX(-50%) translateY(0);   }
+        }
+        @keyframes bookShimmer {
+          0%   { transform: translateX(-100%); }
+          100% { transform: translateX(100%);  }
+        }
+      `}</style>
+    </>
+  );
+}
