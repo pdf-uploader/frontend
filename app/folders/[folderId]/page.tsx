@@ -71,6 +71,8 @@ export default function FolderPage() {
   const [fileSortField,     setFileSortField]     = useState<FileSortField | null>(null);
   const [fileSortDirection, setFileSortDirection] = useState<SortDirection>("desc");
   const [viewMode,          setViewMode]          = useState<ViewMode>("bookshelf");
+  /** Admin delete: confirm before removing a volume from the folder. */
+  const [filePendingDelete, setFilePendingDelete] = useState<FolderFile | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploadUi, setUploadUi] = useState<{
     phase: UploadUiPhase; percent: number; indeterminate: boolean; fileCount: number;
@@ -539,7 +541,7 @@ export default function FolderPage() {
               isAdmin={admin}
               folderLocked={folderLocked}
               searchQuery={folderSearch}
-              onDelete={(id) => deleteFileMutation.mutate(id)}
+              onDelete={(file) => setFilePendingDelete(file)}
             />
           ) : (
             <ListView
@@ -547,7 +549,7 @@ export default function FolderPage() {
               searchQuery={folderSearch}
               isAdmin={admin}
               folderLocked={folderLocked}
-              onDelete={(id) => deleteFileMutation.mutate(id)}
+              onDelete={(file) => setFilePendingDelete(file)}
             />
           )}
 
@@ -556,6 +558,76 @@ export default function FolderPage() {
         {/* Chat widget */}
         <DocumentChatWidget folderId={folderId} contextLabel={folder.foldername} />
       </section>
+
+      {filePendingDelete && (
+        <div
+          role="dialog"
+          aria-modal
+          aria-labelledby="delete-volume-title"
+          onClick={() => { if (!deleteFileMutation.isPending) setFilePendingDelete(null); }}
+          style={{
+            position: "fixed", inset: 0, zIndex: 960,
+            background: "rgba(10,16,34,0.38)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: 400, width: "100%",
+              background: C.paper, border: `1px solid ${C.border}`,
+              borderRadius: 6, padding: "20px 22px",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.12)",
+            }}
+          >
+            <h2 id="delete-volume-title" style={{
+              fontFamily: fontDisplay, fontSize: 18, fontWeight: 700,
+              color: C.navy, margin: 0,
+            }}>
+              Delete this volume?
+            </h2>
+            <p style={{
+              fontFamily: fontSerif, fontSize: 13, color: C.textMid,
+              marginTop: 10, lineHeight: 1.5, wordBreak: "break-word",
+            }}>
+              <strong>{filePendingDelete.filename}</strong> will be removed from this folder. This cannot be undone.
+            </p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 22 }}>
+              <button
+                type="button"
+                disabled={deleteFileMutation.isPending}
+                onClick={() => setFilePendingDelete(null)}
+                style={{
+                  fontFamily: fontSerif, fontSize: 13, padding: "8px 16px",
+                  borderRadius: 4, border: `1px solid ${C.border}`,
+                  background: "#fff", color: C.navy, cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteFileMutation.isPending}
+                onClick={() => {
+                  const id = filePendingDelete.id;
+                  deleteFileMutation.mutate(id, {
+                    onSettled: () => setFilePendingDelete(null),
+                  });
+                }}
+                style={{
+                  fontFamily: fontSerif, fontSize: 13, padding: "8px 16px",
+                  borderRadius: 4, border: "none",
+                  background: "#a53c2e", color: "#fff", cursor: "pointer",
+                  opacity: deleteFileMutation.isPending ? 0.7 : 1,
+                }}
+              >
+                {deleteFileMutation.isPending ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

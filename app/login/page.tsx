@@ -270,7 +270,7 @@ export default function LoginPage() {
                   lineHeight: 1.5,
                 }}>
                   <p>{emailAlert.message}{emailAlert.showSignupLink && (
-                    <> {" "}<Link href="/signup" style={{ color: C.gold }}>Request access</Link></>
+                    <> {" "}<Link href="/signup" style={{ color: C.gold }}>Sign up</Link></>
                   )}</p>
                   {emailAlert.detail && <p style={{ marginTop: 4 }}>{emailAlert.detail}</p>}
                 </div>
@@ -338,7 +338,7 @@ export default function LoginPage() {
               onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = "underline"; }}
               onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = "none"; }}
             >
-              Request access
+              Sign up
             </Link>
           </p>
         </div>

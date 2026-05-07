@@ -83,11 +83,11 @@ const SECTIONS = [
 ];
 
 const TOC_ENTRIES = [
-  { num: '1', name: 'Planning',     page: '14'  },
-  { num: '2', name: 'Design',       page: '52'  },
-  { num: '3', name: 'Construction', page: '98'  },
-  { num: '4', name: 'Operation',    page: '144' },
-  { num: '5', name: 'Maintenance',  page: '186' },
+  { num: '1', name: 'Planning' },
+  { num: '2', name: 'Design' },
+  { num: '3', name: 'Construction' },
+  { num: '4', name: 'Operation' },
+  { num: '5', name: 'Maintenance' },
 ];
 
 // ─── Theme ───────────────────────────────────────────────────────────────────
@@ -114,7 +114,7 @@ const LAST_SPREAD = SECTIONS.length + 1; // 0=toc+welcome, 1–5=sections, 6=log
 const OPEN_MS   = 560;
 const CLOSE_MS  = 780;
 const CLOSE_HOME_MS = 780;
-const FLIP_MS            = 880;  // in-spread page turns only
+const FLIP_MS = 880; // in-book page turns (desktop 3‑D overlay + mobile slide)
 
 /** Same page height as closed cover; spread width ≈ two cover halves + spine (no growth to a separate “wide” aspect) */
 const BOOK_PAGE_H   = 'min(86vh, 680px)';
@@ -136,8 +136,6 @@ function TocLeftContent() {
         <div key={e.num} style={styles.tocEntry}>
           <span style={{ fontFamily: fontDisplay, fontSize: 11, color: C.gold, fontWeight: 700, minWidth: 18, marginTop: 2 }}>{e.num}</span>
           <span style={{ fontFamily: fontSerif, fontSize: 14, color: C.navy }}>{e.name}</span>
-          <span style={{ flex: 1, borderBottom: `1px dotted ${C.paperDot}`, margin: '0 8px', alignSelf: 'center', height: 1 }} />
-          <span style={{ fontFamily: fontSerif, fontSize: 12, color: C.textMuted, minWidth: 20, textAlign: 'right' }}>{e.page}</span>
         </div>
       ))}
     </div>
@@ -155,7 +153,7 @@ function WelcomeRightContent() {
       <div style={{ fontFamily: fontSerif, fontSize: 13.5, color: C.textDark, lineHeight: 1.75, marginBottom: 20 }}>
         This manual covers the complete lifecycle of Uganda's expressway infrastructure — from initial planning through
         design, construction, operation, and long-term maintenance.<br /><br />
-        Flip through the pages to explore each section. Log in to access the full content.
+        Browse the sections to explore each part of the manual. Log in to access the full content.
       </div>
       <div style={{ padding: 14, background: 'rgba(201,124,42,0.07)', borderLeft: `2px solid ${C.gold}`, borderRadius: '0 4px 4px 0' }}>
         <div style={{ fontFamily: fontSerif, fontSize: 12, color: '#7a5a20', lineHeight: 1.6 }}>
@@ -205,11 +203,9 @@ function SectionRightContent({ section }) {
 
 function LoginLeftContent({ onLoginClick }) {
   return (
-    /* height:'100%' + minHeight:0 + boxSizing ensure this container fills the
+       /* height:'100%' + minHeight:0 + boxSizing ensure this container fills the
        pageInner flex column fully, so justify-content:center is computed relative
-       to the full page height — not just the content height. This prevents the
-       "Ready to dive deeper" block from first painting at the top and then
-       jumping to center when the layout settles after the flip animation. */
+       to the full page height — not just the content height. */
     <div style={{
       flex: 1, display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
@@ -223,8 +219,16 @@ function LoginLeftContent({ onLoginClick }) {
         Log in to access the complete reference documentation, detailed specifications, and all annexes.
       </div>
       <button
-        onClick={onLoginClick}
-        style={{ background: C.navy, color: '#fff', fontFamily: fontSerif, fontSize: 13, letterSpacing: '0.08em', border: 'none', borderRadius: 4, padding: '10px 24px', cursor: 'pointer' }}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          onLoginClick();
+        }}
+        style={{
+          background: C.navy, color: '#fff', fontFamily: fontSerif, fontSize: 13, letterSpacing: '0.08em',
+          border: 'none', borderRadius: 4, padding: '10px 24px', cursor: 'pointer', pointerEvents: 'auto',
+        }}
         onMouseEnter={(e) => (e.currentTarget.style.background = C.gold)}
         onMouseLeave={(e) => (e.currentTarget.style.background = C.navy)}
       >
@@ -259,7 +263,7 @@ const styles = {
     fontFamily: fontSerif, fontSize: 9, letterSpacing: '0.2em', textTransform: 'uppercase',
     color: C.textMuted, paddingBottom: 10, borderBottom: `0.5px solid ${C.paperBorder}`, marginBottom: 24,
   },
-  tocEntry: { display: 'flex', alignItems: 'flex-start', padding: '10px 0', borderBottom: `0.5px solid #e8e0d0`, gap: 12 },
+  tocEntry: { display: 'flex', alignItems: 'flex-start', padding: '10px 0', borderBottom: `0.5px solid #e8e0d0`, gap: 14 },
   page: {
     flex: 1,
     minWidth: 0,
@@ -296,12 +300,6 @@ const styles = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getSpreadLabel(spread) {
-  if (spread === 0) return 'i – ii';
-  const start = spread * 2 - 1;
-  return `${start} – ${start + 1}`;
-}
-
 function getSpreadContent(spread, side, onLoginClick) {
   if (spread === 0) return side === 'left' ? <TocLeftContent /> : <WelcomeRightContent />;
   if (spread > SECTIONS.length) return side === 'left' ? <LoginLeftContent onLoginClick={onLoginClick} /> : <LoginRightContent />;
@@ -313,12 +311,6 @@ function getMobilePage(pageIndex, onLoginClick) {
   const spread = Math.floor(pageIndex / 2);
   const side   = pageIndex % 2 === 0 ? 'left' : 'right';
   return getSpreadContent(spread, side, onLoginClick);
-}
-
-function getMobilePageLabel(pageIndex) {
-  if (pageIndex === 0) return 'i';
-  if (pageIndex === 1) return 'ii';
-  return String(pageIndex - 1);
 }
 
 function playPaperRustle() {
@@ -637,24 +629,7 @@ function AnimatingCover({ mode, onDone }) {
   );
 }
 
-// ─── PageFlipOverlay ──────────────────────────────────────────────────────────
-/**
- * Two-face card overlay on the turning half of the spread.
- *
- * Front face: old page content  (visible  0 – 90°, peeling off the current side)
- * Back face:  new page content  (visible 90 – 180°, lands on the opposite side)
- *
- * Using real content on both faces means no blank paper ever appears — the flip
- * shows actual pages the entire rotation, exactly like a physical book turn.
- *
- * Forward flip (right→left):
- *   front = fromSpread RIGHT page (lifts off the right side)
- *   back  = toSpread   LEFT page  (lands on the left side after the turn)
- *
- * Backward flip (left→right):
- *   front = fromSpread LEFT page  (lifts off the left side)
- *   back  = toSpread   RIGHT page (lands on the right side after the turn)
- */
+// ─── PageFlipOverlay (desktop in-book flip) ────────────────────────────────────
 function PageFlipOverlay({ direction, fromSpread, toSpread, onLoginClick }) {
   const isForward = direction === 'forward';
 
@@ -676,8 +651,6 @@ function PageFlipOverlay({ direction, fromSpread, toSpread, onLoginClick }) {
       animation: `${isForward ? 'pageFlipFwd' : 'pageFlipBwd'} ${FLIP_MS}ms cubic-bezier(0.38, 0, 0.24, 1) forwards`,
     }}>
 
-      {/* ── Front face: page being turned away ── */}
-      {/* Same column flex model as PageLeft/PageRight so flex:1 pageInner fills height (avoids centered login block jumping when flip ends). */}
       <div style={{
         ...faceBase,
         background: C.paper,
@@ -695,7 +668,6 @@ function PageFlipOverlay({ direction, fromSpread, toSpread, onLoginClick }) {
             : 'linear-gradient(to right, rgba(0,0,0,0.20) 0%, transparent 26%)' }} />
       </div>
 
-      {/* ── Back face: next page content landing on the opposite side ── */}
       <div style={{
         ...faceBase,
         background: C.paper,
@@ -717,10 +689,7 @@ function PageFlipOverlay({ direction, fromSpread, toSpread, onLoginClick }) {
   );
 }
 
-// ─── MobilePageFlipOverlay ────────────────────────────────────────────────────
-/**
- * Simpler horizontal slide for mobile (no 3-D perspective).
- */
+// ─── MobileFlipOverlay ────────────────────────────────────────────────────────
 function MobileFlipOverlay({ direction, fromPageIndex, onLoginClick }) {
   const isForward = direction === 'forward';
   return (
@@ -774,16 +743,10 @@ function OpenBook({
         position: 'relative',
       }}>
         <div style={styles.pageTexture} />
-        <div style={{ ...styles.pageInner, minHeight: 'min(74vh,640px)' }}>
+        <div style={{ ...styles.pageInner, minHeight: 'min(74vh,640px)', pointerEvents: 'none' }}>
           {getMobilePage(mobilePageIndex, onLoginClick)}
         </div>
-        <div style={{ ...styles.pageFooter, justifyContent: 'center' }}>
-          <span style={{ fontFamily: fontSerif, fontSize: 11, color: C.textMuted }}>
-            {getMobilePageLabel(mobilePageIndex)}
-          </span>
-        </div>
 
-        {/* Mobile flip overlay */}
         {isFlipping && (
           <MobileFlipOverlay
             direction={flipDirection}
@@ -792,7 +755,6 @@ function OpenBook({
           />
         )}
 
-        {/* Tap zones */}
         <button type="button" onClick={() => { if (isFlipping) return; if (isFirstSpread) onClose(); else onTurnBackward(); }}
           style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '40%', opacity: 0, border: 'none', background: 'transparent', cursor: leftCursor }}
           aria-label="Previous page" />
@@ -804,17 +766,11 @@ function OpenBook({
   }
 
   /* ── Desktop layout ── */
-
-  // During a flip, keep the OLD spread's content on whichever side is NOT being flipped.
-  // This prevents the new page from "appearing" before the flip animation reaches that side.
-  //   Forward flip (right→left): the left page must stay on the old spread.
-  //   Backward flip (left→right): the right page must stay on the old spread.
   const leftDisplaySpread  = (isFlipping && flipDirection === 'forward')  ? flipFromSpread : spread;
   const rightDisplaySpread = (isFlipping && flipDirection === 'backward') ? flipFromSpread : spread;
 
   return (
     <SpreadShell style={{ position: 'relative' }} onMouseLeave={() => setHoverSide(null)}>
-      {/* Left page */}
       <PageLeft cursor={leftCursor} onClick={() => { if (isFlipping) return; if (isFirstSpread) onClose(); else if (canGoBackward) onTurnBackward(); }}>
         <div onMouseEnter={() => setHoverSide('left')} style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           {getSpreadContent(leftDisplaySpread, 'left', onLoginClick)}
@@ -823,14 +779,12 @@ function OpenBook({
 
       <Spine />
 
-      {/* Right page */}
       <PageRight cursor={rightCursor} onClick={() => { if (isFlipping || !canGoForward) return; onTurnForward(); }}>
         <div onMouseEnter={() => setHoverSide('right')} style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           {getSpreadContent(rightDisplaySpread, 'right', onLoginClick)}
         </div>
       </PageRight>
 
-      {/* Two-face page flip overlay */}
       {isFlipping && (
         <PageFlipOverlay
           direction={flipDirection}
@@ -840,18 +794,6 @@ function OpenBook({
         />
       )}
 
-      {/* Page counter */}
-      <div style={{
-        position: 'absolute', left: '50%', bottom: 10, transform: 'translateX(-50%)',
-        background: 'rgba(250,248,243,0.92)', border: `1px solid ${C.paperBorder}`,
-        borderRadius: 999, padding: '4px 12px',
-        fontFamily: fontSerif, fontSize: 11, color: C.textMuted,
-        zIndex: 30, pointerEvents: 'none',
-      }}>
-        {getSpreadLabel(spread)}
-      </div>
-
-      {/* Hover affordance chevrons */}
       <div aria-hidden style={{
         position: 'absolute', right: 18, top: '50%', transform: 'translateY(-50%)',
         opacity: hoverSide === 'right' && canGoForward && !isFlipping ? 0.55 : 0,
@@ -879,14 +821,18 @@ function OpenBook({
  *    │  after OPEN_MS
  *    ▼
  *  OPEN
- *    │  click right half     │  click left half (spread=0) → CLOSING
- *    ▼                       ▼
- *  FLIPPING_FWD          CLOSING  (BookClosing*: crossfade spread → portrait cover)
- *    │  after FLIP_MS          │  after CLOSE_MS / CLOSE_HOME_MS
- *    ▼                         ▼
- *  OPEN                     CLOSED
+ *    │  flip through spreads (arrow keys / halves)
+ *    ▼
+ *  FLIPPING_FWD / FLIPPING_BWD  (page-flip animation between spreads)
+ *    │  after FLIP_MS → OPEN
+ *    │  click left (spread=0) → CLOSING
+ *    ▼
+ *  CLOSING  (BookClosing*: crossfade spread → portrait cover)
+ *    │  after CLOSE_MS / CLOSE_HOME_MS
+ *    ▼
+ *  CLOSED
  *
- * During OPENING/CLOSING, cover and spread are layered and opacity-animated (no hinge flip).
+ * The “Log in to view full manual” control calls the login handler directly (no page turn).
  */
 export default function BookHomepage({ onLoginClick }) {
   // 'CLOSED' | 'OPENING' | 'OPEN' | 'FLIPPING_FWD' | 'FLIPPING_BWD' | 'CLOSING'
@@ -1042,7 +988,7 @@ export default function BookHomepage({ onLoginClick }) {
             padding: 'clamp(12px, 2.5vh, 48px) clamp(12px, 5vw, 80px)',
             minHeight: 'min(94vh, 880px)',
             boxSizing: 'border-box',
-            /* Room for page corners during 3-D rotation — avoid clipping sheets in a rigid frame */
+            /* Room for spread corners — avoid clipping during open/close */
             overflow: 'visible',
             /* Disable all clicks/taps while any animation is running */
             pointerEvents: isAnimating ? 'none' : undefined,
@@ -1059,7 +1005,7 @@ export default function BookHomepage({ onLoginClick }) {
             <BookOpeningAnimation onDone={handleOpenDone} />
           )}
 
-          {/* OPEN / FLIPPING: two-page spread */}
+          {/* OPEN / FLIPPING */}
           {(phase === 'OPEN' || isFlipping) && (
             <OpenBook
               spread={spread}
@@ -1157,26 +1103,6 @@ export default function BookHomepage({ onLoginClick }) {
           }
         }
 
-        /* ── Page flip forward: right page sweeps right→left (full 180 °) ── */
-        @keyframes pageFlipFwd {
-          0% {
-            transform: rotateY(0deg);
-          }
-          100% {
-            transform: rotateY(-180deg);
-          }
-        }
-
-        /* ── Page flip backward: left page sweeps left→right (full 180 °) ── */
-        @keyframes pageFlipBwd {
-          0% {
-            transform: rotateY(0deg);
-          }
-          100% {
-            transform: rotateY(180deg);
-          }
-        }
-
         /* Mobile fallback if AnimatingCover is ever used */
         @keyframes mobileCoverOpenFade {
           from {
@@ -1195,26 +1121,21 @@ export default function BookHomepage({ onLoginClick }) {
           }
         }
 
-        /* ── Mobile flip: horizontal slide-out (2× slower via FLIP_MS) ── */
+        @keyframes pageFlipFwd {
+          0% { transform: rotateY(0deg); }
+          100% { transform: rotateY(-180deg); }
+        }
+        @keyframes pageFlipBwd {
+          0% { transform: rotateY(0deg); }
+          100% { transform: rotateY(180deg); }
+        }
         @keyframes mobileFlipFwd {
-          0% {
-            transform: translateX(0);
-            opacity: 1;
-          }
-          100% {
-            transform: translateX(-12%);
-            opacity: 0;
-          }
+          0% { transform: translateX(0); opacity: 1; }
+          100% { transform: translateX(-12%); opacity: 0; }
         }
         @keyframes mobileFlipBwd {
-          0% {
-            transform: translateX(0);
-            opacity: 1;
-          }
-          100% {
-            transform: translateX(12%);
-            opacity: 0;
-          }
+          0% { transform: translateX(0); opacity: 1; }
+          100% { transform: translateX(12%); opacity: 0; }
         }
       `}</style>
     </>

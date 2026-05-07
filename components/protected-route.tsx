@@ -9,8 +9,8 @@ import { ReactNode } from "react";
 /**
  * Public-facing IMME pages do NOT require a session — anyone landing on `/`, `/about`,
  * `/manuals`, etc. should see the project information immediately. Auth gating only kicks in
- * for the staff workspace prefixes. The auth pages themselves (`/login`, `/signup`) bounce
- * to home if a session is already active so we don't show a login UI to a signed-in user.
+ * for the staff workspace prefixes. Signed-in visits to `/` redirect to `/dashboard`. The auth
+ * pages (`/login`, `/signup`) redirect to `/dashboard` if a session is already active.
  */
 const STAFF_PREFIXES = ["/admin", "/users", "/dashboard", "/folders", "/files", "/search"];
 

@@ -115,7 +115,7 @@ function Book3D({
   isAdmin: boolean;
   folderLocked: boolean;
   searchQuery: string;
-  onDelete: (id: string) => void;
+  onDelete: (file: FolderFile) => void;
   adjacentShift?: number;
 }) {
   const router    = useRouter();
@@ -402,7 +402,7 @@ function Book3D({
           {isAdmin && (
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); onDelete(file.id); }}
+              onClick={(e) => { e.stopPropagation(); onDelete(file); }}
               style={{
                 position: "absolute", bottom: 6, right: 6,
                 width: 20, height: 20,
@@ -442,7 +442,7 @@ function ShelfRow({
   isAdmin: boolean;
   folderLocked: boolean;
   searchQuery: string;
-  onDelete: (id: string) => void;
+  onDelete: (file: FolderFile) => void;
 }) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
@@ -592,7 +592,7 @@ export function ListView({
   searchQuery: string;
   isAdmin: boolean;
   folderLocked: boolean;
-  onDelete: (id: string) => void;
+  onDelete: (file: FolderFile) => void;
 }) {
   const router = useRouter();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -641,7 +641,7 @@ export function ListView({
           {isAdmin && (
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); onDelete(file.id); }}
+              onClick={(e) => { e.stopPropagation(); onDelete(file); }}
               style={{
                 width: 24, height: 24, borderRadius: "50%",
                 background: hoveredId === file.id ? "rgba(0,0,0,0.08)" : "transparent",
@@ -675,7 +675,7 @@ export function BookshelfView({
   isAdmin: boolean;
   folderLocked: boolean;
   searchQuery: string;
-  onDelete: (id: string) => void;
+  onDelete: (file: FolderFile) => void;
 }) {
   const rows: FolderFile[][] = [];
   for (let i = 0; i < Math.max(files.length, 1); i += BOOKS_PER_SHELF) {

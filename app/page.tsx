@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import BookHomepage from "@/components/BookHomepage";
-import { BrandedBottomConsultants } from "@/components/branded-logos-shell";
-import { FolderBrowser } from "@/components/folder-browser";
 import { hasAuthSession } from "@/lib/auth-session";
 import { useAuth } from "@/lib/hooks/use-auth";
 
+/**
+ * Public marketing home — interactive manual preview book.
+ * Authenticated staff are sent straight to `/dashboard` (single folder-library UI).
+ */
 export default function HomePage() {
   const router = useRouter();
   const auth = useAuth();
@@ -18,16 +20,26 @@ export default function HomePage() {
     setIsHydrated(true);
   }, []);
 
-  if (!isHydrated || !isLoggedIn) {
+  useEffect(() => {
+    if (!isHydrated || !isLoggedIn) return;
+    router.replace("/dashboard");
+  }, [isHydrated, isLoggedIn, router]);
+
+  /* Before hydrated: match prior behaviour — show the book preview. */
+  if (!isHydrated) {
     return <BookHomepage onLoginClick={() => router.push("/login")} />;
   }
 
-  return (
-    <div className="flex min-h-[calc(100dvh-5.5rem)] w-full flex-col">
-      <div className="ui-shell flex w-full flex-1 flex-col py-5 sm:py-6">
-        <FolderBrowser />
-      </div>
-      <BrandedBottomConsultants />
-    </div>
-  );
+  if (isLoggedIn) {
+    return (
+      <div
+        className="min-h-[100dvh] w-full bg-[#f4f1ec]"
+        aria-busy
+        aria-live="polite"
+        aria-label="Redirecting to dashboard…"
+      />
+    );
+  }
+
+  return <BookHomepage onLoginClick={() => router.push("/login")} />;
 }

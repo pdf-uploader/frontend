@@ -21,6 +21,7 @@ export function AdminPanel() {
   const [uploadFolderId, setUploadFolderId] = useState("");
   const [filesToUpload, setFilesToUpload] = useState<FileList | null>(null);
   const [userPendingDelete, setUserPendingDelete] = useState<AppUser | null>(null);
+  const [filePendingDelete, setFilePendingDelete] = useState<{ id: string; filename: string } | null>(null);
 
   const usersQuery = useQuery({
     queryKey: ["users"],
@@ -274,7 +275,11 @@ export function AdminPanel() {
             folder.files.map((file) => (
               <li key={file.id} className="flex items-center justify-between rounded border border-slate-200 p-2">
                 <span className="truncate break-keep pr-2">{file.filename}</span>
-                <button onClick={() => deleteFileMutation.mutate(file.id)} className="text-xs text-red-600">
+                <button
+                  type="button"
+                  onClick={() => setFilePendingDelete({ id: file.id, filename: file.filename })}
+                  className="text-xs text-red-600"
+                >
                   Delete
                 </button>
               </li>
@@ -301,6 +306,51 @@ export function AdminPanel() {
       }}
       pending={deleteUserMutation.isPending}
     />
+
+    {filePendingDelete && (
+      <div
+        role="dialog"
+        aria-modal
+        aria-labelledby="admin-delete-file-title"
+        className="fixed inset-0 z-[960] flex items-center justify-center bg-slate-900/40 p-4"
+        onClick={() => { if (!deleteFileMutation.isPending) setFilePendingDelete(null); }}
+      >
+        <div
+          className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-lg"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h3 id="admin-delete-file-title" className="text-base font-semibold text-slate-900">
+            Delete this file?
+          </h3>
+          <p className="mt-2 break-words text-sm text-slate-600">
+            <span className="font-medium text-slate-800">{filePendingDelete.filename}</span>
+            {" "}will be removed. This cannot be undone.
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              type="button"
+              disabled={deleteFileMutation.isPending}
+              onClick={() => setFilePendingDelete(null)}
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={deleteFileMutation.isPending}
+              onClick={() => {
+                deleteFileMutation.mutate(filePendingDelete.id, {
+                  onSettled: () => setFilePendingDelete(null),
+                });
+              }}
+              className="rounded bg-red-600 px-3 py-1.5 text-sm text-white disabled:opacity-70"
+            >
+              {deleteFileMutation.isPending ? "Deleting…" : "Delete"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }
