@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
-import { Fragment, ReactNode, useState, useRef, useEffect, useMemo } from "react";
-import { DragEvent, MutableRefObject } from "react";
+import { Fragment, ReactNode, useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
+import { DragEvent, MouseEvent as ReactMouseEvent, MutableRefObject } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useDebounce } from "use-debounce";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -15,19 +15,29 @@ import { Folder } from "@/lib/types";
 
 /* ── Design tokens (matches BookHomepage.jsx) ── */
 const fontSerif = "'Playfair Display', Georgia, serif";
-const fontBody  = "'Source Serif 4', Georgia, serif";
+const fontBody = "'Source Serif 4', Georgia, serif";
 const C = {
-  navy:    "#1a2744",
-  gold:    "#c97c2a",
-  paper:   "#faf8f3",
-  bg:      "#f4f1ec",
-  border:  "#d0c4aa",
-  muted:   "#a07848",
-  spine:   "#f0e8d8", // page-edge cream
+  navy: "#1a2744",
+  gold: "#c97c2a",
+  paper: "#faf8f3",
+  bg: "#f4f1ec",
+  border: "#d0c4aa",
+  muted: "#a07848",
+  spine: "#f0e8d8", // page-edge cream
 };
 
 const BOOKS_PER_SHELF = 5;
 const PAGE_CHUNK_SIZE = 5;
+
+/** Keep OS-style folder context menus inside the viewport */
+function clampFolderContextMenuPosition(x: number, y: number, menuW: number, menuH: number) {
+  if (typeof window === "undefined") return { x, y };
+  const pad = 8;
+  return {
+    x: Math.max(pad, Math.min(x, window.innerWidth - menuW - pad)),
+    y: Math.max(pad, Math.min(y, window.innerHeight - menuH - pad)),
+  };
+}
 
 /** Same idea as folder interior: dim spines that do not match the search string (folder name or any PDF filename). */
 function folderMatchesFileNameFilter(folder: Folder, query: string): boolean {
@@ -43,33 +53,60 @@ interface GlobalFindItem {
   content?: Array<{ page: number; content: string }>;
 }
 
+const folderCtxMenuItemNeutralStyle = {
+  display: "block",
+  width: "100%",
+  boxSizing: "border-box" as const,
+  textAlign: "left" as const,
+  padding: "8px 20px",
+  border: "none",
+  background: "transparent",
+  cursor: "default",
+  font: "inherit",
+  color: "inherit",
+};
+
+const folderCtxMenuItemDangerStyle = {
+  ...folderCtxMenuItemNeutralStyle,
+  color: "#c2392b",
+};
+
 /* ═══════════════════════════════════════════════════════════════
    FolderBrowser (top-level export — data & state unchanged)
 ═══════════════════════════════════════════════════════════════ */
 export function FolderBrowser() {
-  const queryClient   = useQueryClient();
-  const pathname      = usePathname();
-  const router        = useRouter();
-  const searchParams  = useSearchParams();
-  const { user }      = useAuth();
-  const admin         = isAdminUser(user);
-  const urlKeyword    = searchParams.get("keyword") ?? "";
+  const queryClient = useQueryClient();
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { user } = useAuth();
+  const admin = isAdminUser(user);
+  const urlKeyword = searchParams.get("keyword") ?? "";
 
-  const [globalSearch,      setGlobalSearch]      = useState(urlKeyword);
-  const [newFolderName,     setNewFolderName]      = useState("");
-  const [newFolderLock,     setNewFolderLock]      = useState(false);
-  const [showCreateFolder,  setShowCreateFolder]   = useState(false);
-  const [editingFolderId,   setEditingFolderId]    = useState<string | null>(null);
-  const [folderNameDraft,   setFolderNameDraft]    = useState("");
-  const [folderLockDraft,   setFolderLockDraft]    = useState(false);
-  const [orderedFolders,    setOrderedFolders]     = useState<Folder[]>([]);
-  const [draggedFolderId,   setDraggedFolderId]    = useState<string | null>(null);
-  const [dragOverFolderId,  setDragOverFolderId]   = useState<string | null>(null);
-  const [lockedModal,       setLockedModal]        = useState<string | null>(null);
-  const [deleteConfirm,      setDeleteConfirm]      = useState<{ id: string; name: string } | null>(null);
-  const orderedFoldersRef   = useRef<Folder[]>([]);
-  const folderDragGhostRef  = useRef<HTMLDivElement | null>(null);
+  const [globalSearch, setGlobalSearch] = useState(urlKeyword);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderLock, setNewFolderLock] = useState(false);
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [orderedFolders, setOrderedFolders] = useState<Folder[]>([]);
+  const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [lockedModal, setLockedModal] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
+  const orderedFoldersRef = useRef<Folder[]>([]);
+  const folderDragGhostRef = useRef<HTMLDivElement | null>(null);
   const folderDragPointerOffsetRef = useRef({ x: 0, y: 0 });
+  const folderContextMenuRef = useRef<HTMLDivElement | null>(null);
+
+  /** Folder context: Rename · Lock/unlock · Delete */
+  const [folderContextMenu, setFolderContextMenu] = useState<{
+    folderId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  /** Inline rename on the spine (Windows Explorer–style). */
+  const [inlineRenamingFolderId, setInlineRenamingFolderId] = useState<string | null>(null);
+  const [inlineRenameDraft, setInlineRenameDraft] = useState("");
 
   const [debouncedGlobalSearch] = useDebounce(globalSearch, 300);
 
@@ -96,7 +133,7 @@ export function FolderBrowser() {
     mutationFn: async ({ folderId, foldername, lock }: { folderId: string; foldername: string; lock: boolean }) =>
       api.patch(`/folders/${folderId}`, { foldername, lock }),
     onSuccess: () => {
-      setEditingFolderId(null); setFolderNameDraft(""); setFolderLockDraft(false);
+      setInlineRenamingFolderId(null); setInlineRenameDraft("");
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["folder"] });
     },
@@ -104,15 +141,14 @@ export function FolderBrowser() {
   const deleteFolderMutation = useMutation({
     mutationFn: async (folderId: string) => api.delete(`/folders/${folderId}`),
     onSuccess: () => {
-      setEditingFolderId(null); setFolderNameDraft(""); setFolderLockDraft(false);
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     },
   });
   const saveFolderOrdersMutation = useMutation({
     mutationFn: async (orders: { folderId: string; order: number }[]) =>
       api.patch("/folders/order", { orders }),
-    onSuccess:  () => { void queryClient.invalidateQueries({ queryKey: ["folders"] }); },
-    onError:    () => { void queryClient.invalidateQueries({ queryKey: ["folders"] }); },
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["folders"] }); },
+    onError: () => { void queryClient.invalidateQueries({ queryKey: ["folders"] }); },
   });
 
   const serverFolderListSignature = useMemo(
@@ -140,11 +176,54 @@ export function FolderBrowser() {
     const t = debouncedGlobalSearch.trim();
     if (t) params.set("keyword", t); else params.delete("keyword");
     const currentQ = searchParams.toString();
-    const nextQ    = params.toString();
+    const nextQ = params.toString();
     if (currentQ !== nextQ) {
       router.replace(nextQ ? `${pathname}?${nextQ}` : pathname, { scroll: false });
     }
   }, [debouncedGlobalSearch, pathname, router, searchParams]);
+
+  useEffect(() => {
+    if (!folderContextMenu) return;
+    const close = () => setFolderContextMenu(null);
+    const onMouseDown = (ev: globalThis.MouseEvent) => {
+      const root = folderContextMenuRef.current;
+      if (root && !root.contains(ev.target as Node)) close();
+    };
+    const onKeyDown = (ev: globalThis.KeyboardEvent) => {
+      if (ev.key === "Escape") close();
+    };
+    document.addEventListener("mousedown", onMouseDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [folderContextMenu]);
+
+  const cancelInlineRename = () => {
+    setInlineRenamingFolderId(null);
+    setInlineRenameDraft("");
+  };
+
+  const commitInlineRename = (folder: Folder) => {
+    if (renameFolderMutation.isPending) return;
+    const draft = inlineRenameDraft.trim();
+    if (!draft) {
+      cancelInlineRename();
+      return;
+    }
+    if (draft === folder.foldername) {
+      cancelInlineRename();
+      return;
+    }
+    renameFolderMutation.mutate({
+      folderId: folder.id,
+      foldername: draft,
+      lock: !!folder.lock,
+    });
+  };
 
   const onFolderDrop = (event: DragEvent<HTMLElement>, targetFolderId: string) => {
     event.preventDefault();
@@ -164,22 +243,28 @@ export function FolderBrowser() {
     shelves.push(orderedFolders.slice(i, i + BOOKS_PER_SHELF));
   }
 
+  const folderContextMenuTarget =
+    folderContextMenu && orderedFolders.find((f) => f.id === folderContextMenu.folderId);
+
+  /** Keep spine “raised” while the context menu is open or while inline-renaming */
+  const pinnedHoverFolderId = folderContextMenu?.folderId ?? inlineRenamingFolderId ?? null;
+
   return (
     <section style={{ fontFamily: fontBody }}>
 
       {/* ── Search bar ── */}
       <div style={{
         background: C.paper, border: `1px solid ${C.border}`,
-        borderRadius: 6, padding: "16px 20px", marginBottom: 28,
+        borderRadius: 9, padding: "24px 30px", marginBottom: 42,
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
           {/* Search input */}
           <div style={{ position: "relative", flex: 1 }}>
             <span style={{
-              position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
+              position: "absolute", left: 18, top: "50%", transform: "translateY(-50%)",
               pointerEvents: "none", color: C.navy, opacity: 0.5, display: "flex",
             }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" strokeWidth="2" aria-hidden>
                 <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
               </svg>
@@ -191,24 +276,24 @@ export function FolderBrowser() {
               placeholder="Search manuals, chapters, keywords…"
               style={{
                 width: "100%", boxSizing: "border-box",
-                padding: "9px 12px 9px 38px",
-                fontFamily: fontBody, fontSize: 14, fontStyle: "italic",
+                padding: "14px 18px 14px 57px",
+                fontFamily: fontBody, fontSize: 21, fontStyle: "italic",
                 color: C.navy,
                 background: "white",
                 border: `1px solid ${C.border}`,
-                borderRadius: 4,
+                borderRadius: 6,
                 outline: "none",
                 transition: "border-color 200ms, box-shadow 200ms",
               }}
               onFocus={e => {
                 e.currentTarget.style.borderColor = C.gold;
-                e.currentTarget.style.boxShadow  = "0 0 0 3px rgba(201,124,42,0.12)";
-                e.currentTarget.style.fontStyle   = "normal";
+                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(201,124,42,0.12)";
+                e.currentTarget.style.fontStyle = "normal";
               }}
               onBlur={e => {
                 e.currentTarget.style.borderColor = C.border;
-                e.currentTarget.style.boxShadow   = "none";
-                e.currentTarget.style.fontStyle   = globalSearch ? "normal" : "italic";
+                e.currentTarget.style.boxShadow = "none";
+                e.currentTarget.style.fontStyle = globalSearch ? "normal" : "italic";
               }}
             />
           </div>
@@ -220,11 +305,11 @@ export function FolderBrowser() {
               onClick={() => setShowCreateFolder(v => !v)}
               title="New folder"
               style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "8px 14px",
-                fontFamily: fontBody, fontSize: 13, color: C.navy,
+                display: "flex", alignItems: "center", gap: 9,
+                padding: "12px 21px",
+                fontFamily: fontBody, fontSize: 20, color: C.navy,
                 background: "transparent", border: `1px solid ${C.navy}`,
-                borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap",
+                borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap",
                 transition: "background 200ms",
               }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(26,39,68,0.06)"; }}
@@ -254,8 +339,10 @@ export function FolderBrowser() {
                   background: "white", color: C.navy, outline: "none",
                 }}
               />
-              <label style={{ display: "flex", alignItems: "center", gap: 8,
-                fontFamily: fontBody, fontSize: 13, color: C.navy, cursor: "pointer" }}>
+              <label style={{
+                display: "flex", alignItems: "center", gap: 8,
+                fontFamily: fontBody, fontSize: 13, color: C.navy, cursor: "pointer"
+              }}>
                 <input
                   type="checkbox" checked={newFolderLock}
                   onChange={e => setNewFolderLock(e.target.checked)}
@@ -325,14 +412,20 @@ export function FolderBrowser() {
           admin={admin}
           draggedFolderId={draggedFolderId}
           dragOverFolderId={dragOverFolderId}
+          pinnedHoverFolderId={pinnedHoverFolderId}
+          inlineRenamingFolderId={inlineRenamingFolderId}
+          inlineRenameDraft={inlineRenameDraft}
+          onInlineRenameDraftChange={setInlineRenameDraft}
+          onCommitInlineRename={commitInlineRename}
+          onCancelInlineRename={cancelInlineRename}
+          renameFolderPending={renameFolderMutation.isPending}
+          renameFolderTargetId={renameFolderMutation.variables?.folderId ?? null}
           onOpenLocked={setLockedModal}
-          onEditToggle={(id) => {
-            setEditingFolderId((prev) => (prev === id ? null : id));
-            const f = orderedFolders.find((x) => x.id === id);
-            if (f) {
-              setFolderNameDraft(f.foldername);
-              setFolderLockDraft(!!f.lock);
-            }
+          onFolderContextMenu={(folderId, e) => {
+            const MENU_W = 172;
+            const MENU_H = admin ? 152 : 112;
+            const pt = clampFolderContextMenuPosition(e.clientX, e.clientY, MENU_W, MENU_H);
+            setFolderContextMenu({ folderId, x: pt.x, y: pt.y });
           }}
           onDragStart={(folderId, event, cardEl) => {
             setDraggedFolderId(folderId);
@@ -345,7 +438,7 @@ export function FolderBrowser() {
             if (!ghost || (event.clientX === 0 && event.clientY === 0)) return;
             const { x, y } = folderDragPointerOffsetRef.current;
             ghost.style.left = `${event.clientX - x}px`;
-            ghost.style.top  = `${event.clientY - y}px`;
+            ghost.style.top = `${event.clientY - y}px`;
           }}
           onDragEnd={() => {
             folderDragGhostRef.current?.remove(); folderDragGhostRef.current = null;
@@ -365,48 +458,6 @@ export function FolderBrowser() {
           globalStartIndex={shelfIndex * BOOKS_PER_SHELF}
         />
       ))}
-
-      {/* Admin: folder edit floats over shelf (layout does not shift) */}
-      {admin && editingFolderId && (
-        <div
-          role="dialog"
-          aria-modal
-          aria-labelledby="folder-edit-title"
-          onClick={() => { setEditingFolderId(null); setFolderNameDraft(""); setFolderLockDraft(false); }}
-          style={{
-            position: "fixed", inset: 0, zIndex: 940,
-            background: "rgba(10,16,34,0.38)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: 16,
-          }}
-        >
-          <div onClick={(e) => e.stopPropagation()}>
-            <p id="folder-edit-title" style={{ fontFamily: fontSerif, fontSize: 16, fontWeight: 700, color: C.navy, marginBottom: 10 }}>
-              Edit folder
-            </p>
-            <EditPanel
-              nameDraft={folderNameDraft}
-              lockDraft={folderLockDraft}
-              onNameChange={setFolderNameDraft}
-              onLockChange={setFolderLockDraft}
-              onSave={() => {
-                renameFolderMutation.mutate({
-                  folderId: editingFolderId,
-                  foldername: folderNameDraft.trim(),
-                  lock: folderLockDraft,
-                });
-              }}
-              onCancel={() => { setEditingFolderId(null); setFolderNameDraft(""); setFolderLockDraft(false); }}
-              onRequestDelete={() => {
-                const f = orderedFolders.find((x) => x.id === editingFolderId);
-                if (f) setDeleteConfirm({ id: f.id, name: f.foldername });
-              }}
-              renamePending={renameFolderMutation.isPending}
-              deletePending={deleteFolderMutation.isPending}
-            />
-          </div>
-        </div>
-      )}
 
       {/* ── Locked book modal ── */}
       {lockedModal && (
@@ -520,6 +571,85 @@ export function FolderBrowser() {
         </div>
       )}
 
+      {folderContextMenu && folderContextMenuTarget && (
+        <div
+          ref={folderContextMenuRef}
+          role="menu"
+          aria-label="Folder actions"
+          style={{
+            position: "fixed",
+            left: folderContextMenu.x,
+            top: folderContextMenu.y,
+            zIndex: 955,
+            minWidth: 168,
+            padding: "4px 0",
+            background: "#ffffff",
+            border: "1px solid #cacaca",
+            borderRadius: 4,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.16), 0 0 1px rgba(0,0,0,0.08)",
+            fontFamily: "\"Segoe UI\", system-ui, -apple-system, sans-serif",
+            fontSize: 13,
+            color: "#242424",
+          }}
+        >
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setInlineRenamingFolderId(folderContextMenuTarget.id);
+                setInlineRenameDraft(folderContextMenuTarget.foldername);
+                setFolderContextMenu(null);
+              }}
+              style={folderCtxMenuItemNeutralStyle}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#ebebeb"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              Rename…
+            </button>
+            {admin && (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={renameFolderMutation.isPending}
+                onClick={() => {
+                  const f = folderContextMenuTarget;
+                  setFolderContextMenu(null);
+                  renameFolderMutation.mutate({
+                    folderId: f.id,
+                    foldername: f.foldername,
+                    lock: !f.lock,
+                  });
+                }}
+                style={{
+                  ...folderCtxMenuItemNeutralStyle,
+                  opacity: renameFolderMutation.isPending ? 0.5 : 1,
+                  cursor: renameFolderMutation.isPending ? "default" : "pointer",
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#ebebeb"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+              >
+                {folderContextMenuTarget.lock ? "Unlock" : "Lock"}
+              </button>
+            )}
+            <div style={{ height: 1, background: "#e0e0e0", margin: "2px 6px" }} role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setFolderContextMenu(null);
+                setDeleteConfirm({ id: folderContextMenuTarget.id, name: folderContextMenuTarget.foldername });
+              }}
+              style={folderCtxMenuItemDangerStyle}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#fce8e8"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              Delete
+            </button>
+          </>
+        </div>
+      )}
+
       <DocumentChatWidget />
     </section>
   );
@@ -537,8 +667,17 @@ type ShelfProps = {
   admin: boolean;
   draggedFolderId: string | null;
   dragOverFolderId: string | null;
+  /** Keeps spine hover lift while context menu open or inline rename active */
+  pinnedHoverFolderId: string | null;
+  inlineRenamingFolderId: string | null;
+  inlineRenameDraft: string;
+  onInlineRenameDraftChange: (value: string) => void;
+  onCommitInlineRename: (folder: Folder) => void;
+  onCancelInlineRename: () => void;
+  renameFolderPending: boolean;
+  renameFolderTargetId: string | null;
   onOpenLocked: (id: string) => void;
-  onEditToggle: (id: string) => void;
+  onFolderContextMenu: (folderId: string, e: ReactMouseEvent) => void;
   onDragStart: (id: string, event: DragEvent<HTMLElement>, el: HTMLElement) => void;
   onDrag: (event: DragEvent<HTMLElement>) => void;
   onDragEnd: () => void;
@@ -550,19 +689,37 @@ type ShelfProps = {
 function Shelf({
   folders, shelfIndex, globalStartIndex, fileNameFilter, admin,
   draggedFolderId, dragOverFolderId,
-  onOpenLocked, onEditToggle,
+  pinnedHoverFolderId, inlineRenamingFolderId, inlineRenameDraft,
+  onInlineRenameDraftChange, onCommitInlineRename, onCancelInlineRename,
+  renameFolderPending, renameFolderTargetId,
+  onOpenLocked, onFolderContextMenu,
   onDragStart, onDrag, onDragEnd, onDragOver, onDragLeave, onDrop,
 }: ShelfProps) {
   const router = useRouter();
-  const [hoveredId,  setHoveredId]  = useState<string | null>(null);
-  const [pullingId,  setPullingId]  = useState<string | null>(null); // "pull off shelf" exit anim
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [pullingId, setPullingId] = useState<string | null>(null); // "pull off shelf" exit anim
 
   const handleBookClick = (folder: Folder) => {
+    if (inlineRenamingFolderId === folder.id) return;
     if (folder.lock && !admin) { onOpenLocked(folder.id); return; }
     setPullingId(folder.id);
     setTimeout(() => {
       router.push(`/folders/${folder.id}`);
     }, 220);
+  };
+
+  /** Capture phase: required so `preventDefault` runs before the browser menu when the hit target is inside `draggable`. */
+  const handleShelfWallContextMenuCapture = (e: ReactMouseEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement | null;
+    if (!t) return;
+    const hit = t.closest("[data-folder-card]");
+    if (!hit) return;
+    const folderId = hit.getAttribute("data-folder-id");
+    if (!folderId) return;
+    if (inlineRenamingFolderId === folderId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onFolderContextMenu(folderId, e);
   };
 
   return (
@@ -574,20 +731,26 @@ function Shelf({
         padding: "24px 24px 0",
         display: "flex", alignItems: "flex-end", gap: 6,
         flexWrap: "wrap",
-        minHeight: 260,
+        minHeight: 390,
         position: "relative",
         /* vertical woodgrain */
         backgroundImage:
           "repeating-linear-gradient(90deg, transparent, transparent 48px, rgba(0,0,0,0.018) 48px, rgba(0,0,0,0.018) 49px)",
-      }}>
+      }}
+        onContextMenuCapture={handleShelfWallContextMenuCapture}
+      >
         {folders.map((folder, idx) => {
-          const absIdx   = globalStartIndex + idx;
-          const color    = resolveShelfSpineColor(folder);
+          const absIdx = globalStartIndex + idx;
+          const color = resolveShelfSpineColor(folder);
           const isLocked = !!folder.lock && !admin;
-          const isHovered = hoveredId === folder.id && !pullingId;
+          const isHovered =
+            !pullingId && (hoveredId === folder.id || pinnedHoverFolderId === folder.id);
+          const isDraggingThis = inlineRenamingFolderId !== folder.id;
+          const isRenaming = inlineRenamingFolderId === folder.id;
           const isPulling = pullingId === folder.id;
           const isDragged = draggedFolderId === folder.id;
           const isDragOver = dragOverFolderId === folder.id;
+          const renamePendingHere = renameFolderPending && renameFolderTargetId === folder.id;
 
           const fileFilterMatches = folderMatchesFileNameFilter(folder, fileNameFilter);
 
@@ -603,10 +766,15 @@ function Shelf({
               isDragOver={isDragOver}
               fileFilterMatches={fileFilterMatches}
               admin={admin}
+              isRenaming={isRenaming}
+              inlineRenameDraft={inlineRenameDraft}
+              onInlineRenameDraftChange={onInlineRenameDraftChange}
+              onCommitInlineRename={() => onCommitInlineRename(folder)}
+              onCancelInlineRename={onCancelInlineRename}
+              renamePending={renamePendingHere}
               onHoverIn={() => setHoveredId(folder.id)}
               onHoverOut={() => setHoveredId(null)}
               onClick={() => handleBookClick(folder)}
-              onEditToggle={() => onEditToggle(folder.id)}
             />
           );
 
@@ -614,7 +782,9 @@ function Shelf({
             return (
               <div
                 key={folder.id}
-                draggable
+                data-folder-card
+                data-folder-id={folder.id}
+                draggable={isDraggingThis}
                 title="Drag to reorder"
                 onDragStart={e => onDragStart(folder.id, e as unknown as DragEvent<HTMLElement>, e.currentTarget)}
                 onDrag={e => onDrag(e as unknown as DragEvent<HTMLElement>)}
@@ -630,7 +800,12 @@ function Shelf({
           }
 
           return (
-            <div key={folder.id} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div
+              key={folder.id}
+              data-folder-card
+              data-folder-id={folder.id}
+              style={{ display: "flex", flexDirection: "column", alignItems: "center" }}
+            >
               {bookEl}
             </div>
           );
@@ -663,29 +838,57 @@ type BookSpineProps = {
   /** False when the dashboard search box is non-empty and this folder/name does not match. */
   fileFilterMatches: boolean;
   admin: boolean;
+  isRenaming: boolean;
+  inlineRenameDraft: string;
+  onInlineRenameDraftChange: (value: string) => void;
+  onCommitInlineRename: () => void;
+  onCancelInlineRename: () => void;
+  renamePending: boolean;
   onHoverIn: () => void;
   onHoverOut: () => void;
   onClick: () => void;
-  onEditToggle: () => void;
 };
 
 function BookSpine({
   folder, color, folderSealed, isLocked,
   isHovered, isPulling, isDragged, isDragOver, fileFilterMatches,
-  admin, onHoverIn, onHoverOut, onClick, onEditToggle,
+  admin, isRenaming, inlineRenameDraft,
+  onInlineRenameDraftChange, onCommitInlineRename, onCancelInlineRename, renamePending,
+  onHoverIn, onHoverOut, onClick,
 }: BookSpineProps) {
   /* Detect touch device to replace hover→tap scale */
   const [isTouch, setIsTouch] = useState(false);
   useEffect(() => { setIsTouch(window.matchMedia("(hover: none)").matches); }, []);
 
-  const W = 76; // spine width
-  const H = 220; // spine height
+  const renameCommitOnBlurRef = useRef(true);
+  useEffect(() => {
+    if (isRenaming) renameCommitOnBlurRef.current = true;
+  }, [isRenaming]);
+
+  const renameTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const W = 228; // spine width (3× baseline 76px)
+  const H = 330; // spine height (1.5× baseline 220px)
+  const titleAreaMaxH = H - 95;
+  useEffect(() => {
+    if (!isRenaming) return;
+    const el = renameTextareaRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, [isRenaming]);
+  useLayoutEffect(() => {
+    if (!isRenaming) return;
+    const el = renameTextareaRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(el.scrollHeight, titleAreaMaxH)}px`;
+  }, [isRenaming, inlineRenameDraft, titleAreaMaxH]);
 
   const transform =
-    isPulling  ? "translateY(-30px)" :
-    isHovered  ? (isTouch ? "scale(1.03)" : "translateZ(20px) translateY(-10px)") :
-    isDragOver ? "translateY(-6px)"  :
-    "none";
+    isPulling ? "translateY(-30px)" :
+      isHovered ? (isTouch ? "scale(1.03)" : "translateZ(20px) translateY(-10px)") :
+        isDragOver ? "translateY(-6px)" :
+          "none";
   const shadow =
     isHovered
       ? "-4px 10px 24px rgba(0,0,0,0.32), inset -4px 0 8px rgba(0,0,0,0.18)"
@@ -708,14 +911,16 @@ function BookSpine({
         style={{
           position: "relative",
           display: "flex",
-          cursor: isLocked && !admin ? "not-allowed" : "pointer",
+          cursor:
+            isRenaming ? "text" :
+              isLocked && !admin ? "not-allowed" : "pointer",
           opacity: isDragged ? 0.35 : 1,
           transition: "transform 150ms ease-out, box-shadow 150ms, opacity 200ms",
           transform,
         }}
         onMouseEnter={onHoverIn}
         onMouseLeave={onHoverOut}
-        onClick={onClick}
+        onClick={isRenaming ? undefined : onClick}
       >
         {/* Main spine face */}
         <div
@@ -728,56 +933,125 @@ function BookSpine({
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            padding: "12px 0 10px",
+            padding: "18px 0 15px",
             boxShadow: shadow,
             borderRadius: "2px 0 0 2px",
             overflow: "hidden",
             transition: "box-shadow 150ms",
-            border: openReferenceSpine ? `1px solid rgba(26,39,68,0.12)` : "none",
+            borderTop:
+              openReferenceSpine ? "1px solid rgba(26,39,68,0.12)" : "none",
+            borderLeft:
+              openReferenceSpine ? "1px solid rgba(26,39,68,0.12)" : "none",
+            borderBottom:
+              openReferenceSpine ? "1px solid rgba(26,39,68,0.12)" : "none",
             borderRight: "none",
           }}
         >
           {/* Accent stripe */}
           <div style={{
-            position: "absolute", top: 14, left: 0, right: 0,
-            height: 3,
+            position: "absolute", top: 21, left: 0, right: 0,
+            height: 5,
             background: openReferenceSpine ? "rgba(201,124,42,0.55)" : C.gold,
             opacity: openReferenceSpine ? 1 : 0.9,
           }} />
 
           {/* Top cap */}
           <div style={{
-            position: "absolute", top: 0, left: 0, right: 0, height: 8,
+            position: "absolute", top: 0, left: 0, right: 0, height: 12,
             background: openReferenceSpine ? "rgba(26,39,68,0.06)" : "rgba(0,0,0,0.22)",
           }} />
 
-          {/* Title (vertical, rotated) */}
+          {/* Title — horizontal (Windows-style inline rename) */}
           <div style={{
             flex: 1,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            writingMode: "vertical-rl",
-            transform: "rotate(180deg)",
-            padding: "8px 6px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "12px 10px",
             overflow: "hidden",
+            width: "100%",
+            boxSizing: "border-box",
+            minHeight: 0,
           }}>
-            <span style={{
-              fontFamily: fontSerif,
-              fontSize: folder.foldername.length > 20 ? 10 : 12,
-              fontWeight: 600,
-              color: openReferenceSpine ? C.navy : "rgba(255,255,255,0.92)",
-              letterSpacing: "0.03em",
-              lineHeight: 1.25,
-              textAlign: "center",
-              maxHeight: H - 60,
-              overflow: "hidden",
-            }}>
-              {folder.foldername}
-            </span>
+            {isRenaming ? (
+              <textarea
+                ref={renameTextareaRef}
+                value={inlineRenameDraft}
+                onChange={(e) =>
+                  onInlineRenameDraftChange(e.target.value.replace(/\r\n|\r|\n/g, " "))
+                }
+                onBlur={() => {
+                  if (!renameCommitOnBlurRef.current) {
+                    renameCommitOnBlurRef.current = true;
+                    return;
+                  }
+                  onCommitInlineRename();
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    (e.currentTarget as HTMLTextAreaElement).blur();
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    renameCommitOnBlurRef.current = false;
+                    onCancelInlineRename();
+                  }
+                }}
+                disabled={renamePending}
+                aria-label="Folder name"
+                rows={1}
+                style={{
+                  width: "100%",
+                  minWidth: 0,
+                  minHeight: "2.75em",
+                  maxHeight: titleAreaMaxH,
+                  boxSizing: "border-box",
+                  textAlign: "center",
+                  fontFamily: fontSerif,
+                  fontSize: inlineRenameDraft.length > 20 ? 20 : 24,
+                  fontWeight: 600,
+                  letterSpacing: "0.03em",
+                  lineHeight: 1.3,
+                  color: openReferenceSpine ? C.navy : "rgba(255,255,255,0.95)",
+                  background: openReferenceSpine ? "rgba(255,255,255,0.92)" : "rgba(0,0,0,0.22)",
+                  border: `1px solid ${openReferenceSpine ? C.gold : "rgba(255,255,255,0.35)"}`,
+                  borderRadius: 2,
+                  padding: "4px 6px",
+                  outline: "none",
+                  resize: "none",
+                  overflowY: "auto",
+                  overflowX: "hidden",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  overflowWrap: "break-word",
+                }}
+              />
+            ) : (
+              <span style={{
+                display: "block",
+                fontFamily: fontSerif,
+                fontSize: folder.foldername.length > 20 ? 20 : 24,
+                fontWeight: 600,
+                color: openReferenceSpine ? C.navy : "rgba(255,255,255,0.92)",
+                letterSpacing: "0.03em",
+                lineHeight: 1.3,
+                textAlign: "center",
+                wordBreak: "break-word",
+                overflow: "hidden",
+                maxHeight: titleAreaMaxH,
+              }}>
+                {folder.foldername}
+              </span>
+            )}
           </div>
 
           {/* Lock / file count / open label */}
           <div style={{
-            fontFamily: fontBody, fontSize: 9,
+            fontFamily: fontBody, fontSize: 18,
             color: openReferenceSpine ? C.muted : "rgba(255,255,255,0.65)",
             letterSpacing: "0.04em",
             textAlign: "center",
@@ -789,7 +1063,7 @@ function BookSpine({
 
         {/* Right face — stacked pages edge */}
         <div style={{
-          width: 9, height: H,
+          width: 27, height: H,
           background: openReferenceSpine ? "#f5eee2" : "#f0e8d8",
           backgroundImage: openReferenceSpine
             ? "repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(26,39,68,0.06) 2px,rgba(26,39,68,0.06) 3px)"
@@ -797,127 +1071,8 @@ function BookSpine({
           borderRadius: "0 2px 2px 0",
           boxShadow: "inset -1px 0 3px rgba(0,0,0,0.08)",
         }} />
-
-        {/* Hover tooltip */}
-        {isHovered && !isPulling && (
-          <div style={{
-            position: "absolute",
-            bottom: "calc(100% + 10px)",
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: C.paper,
-            border: `1px solid ${C.border}`,
-            borderRadius: 4,
-            padding: "8px 12px",
-            whiteSpace: "nowrap",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-            zIndex: 50,
-            animation: "tooltipRise 150ms ease-out forwards",
-            pointerEvents: "none",
-          }}>
-            <p style={{ fontFamily: fontSerif, fontSize: 12, color: C.navy, fontWeight: 600, marginBottom: 3 }}>
-              {folder.foldername}
-            </p>
-            <p style={{ fontFamily: fontBody, fontSize: 11, color: C.muted }}>
-              {folder.lock && !admin
-                ? "Access restricted · Contact admin"
-                : `${folder.files.length} file${folder.files.length === 1 ? "" : "s"} · Click to open`}
-            </p>
-          </div>
-        )}
       </div>
 
-      {/* Admin edit button beneath book */}
-      {admin && (
-        <button
-          type="button"
-          onClick={e => { e.stopPropagation(); onEditToggle(); }}
-          title="Edit folder"
-          style={{
-            marginTop: 4, fontFamily: fontBody, fontSize: 10,
-            color: C.muted, background: "none", border: "none",
-            cursor: "pointer", padding: "2px 6px", borderRadius: 3,
-            opacity: isHovered ? 1 : 0.4,
-            transition: "opacity 150ms",
-          }}
-        >
-          ✏️ edit
-        </button>
-      )}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   EditPanel — admin folder edit form (mounted in fullscreen overlay)
-═══════════════════════════════════════════════════════════════ */
-function EditPanel({
-  nameDraft, lockDraft,
-  onNameChange, onLockChange, onSave, onCancel, onRequestDelete,
-  renamePending, deletePending,
-}: {
-  nameDraft: string; lockDraft: boolean;
-  onNameChange: (v: string) => void; onLockChange: (v: boolean) => void;
-  onSave: () => void; onCancel: () => void; onRequestDelete: () => void;
-  renamePending: boolean; deletePending: boolean;
-}) {
-  return (
-    <div style={{
-      padding: "14px",
-      background: C.paper, border: `1px solid ${C.border}`,
-      borderRadius: 8, width: 260,
-      boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
-    }}>
-      <input
-        value={nameDraft}
-        onChange={e => onNameChange(e.target.value)}
-        placeholder="Rename folder"
-        style={{
-          width: "100%", boxSizing: "border-box",
-          padding: "6px 8px", fontFamily: fontBody, fontSize: 12,
-          border: `1px solid ${C.border}`, borderRadius: 3,
-          color: C.navy, background: "white", outline: "none", marginBottom: 8,
-        }}
-      />
-      <label style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 10,
-        fontFamily: fontBody, fontSize: 12, color: C.navy, cursor: "pointer" }}>
-        <input type="checkbox" checked={lockDraft} onChange={e => onLockChange(e.target.checked)}
-          style={{ accentColor: C.navy }} />
-        Lock folder
-      </label>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={!nameDraft.trim() || renamePending}
-            style={{
-            flex: 1, padding: "5px 0",
-            fontFamily: fontBody, fontSize: 11, color: "white",
-            background: C.navy, border: "none", borderRadius: 3, cursor: "pointer",
-            opacity: !nameDraft.trim() ? 0.5 : 1,
-          }}>
-            {renamePending ? "Saving…" : "Save"}
-          </button>
-          <button type="button" onClick={onCancel}
-            style={{
-              flex: 1, padding: "5px 0",
-              fontFamily: fontBody, fontSize: 11, color: C.navy,
-              background: "transparent", border: `1px solid ${C.border}`, borderRadius: 3, cursor: "pointer",
-            }}
-          >
-            Cancel
-          </button>
-        </div>
-        <button type="button" onClick={onRequestDelete} disabled={deletePending}
-          style={{
-            width: "100%", padding: "5px 0",
-            fontFamily: fontBody, fontSize: 11, color: "white",
-            background: "#c0392b", border: "none", borderRadius: 3, cursor: "pointer",
-          }}>
-          {deletePending ? "…" : "Delete folder"}
-        </button>
-      </div>
     </div>
   );
 }
@@ -937,7 +1092,7 @@ function GlobalSearchItem({ item, keyword, returnTo }: { item: GlobalFindItem; k
     [item.content, keyword]
   );
   const totalChunks = Math.max(1, Math.ceil(pageEntries.length / PAGE_CHUNK_SIZE));
-  const pageStart   = pageChunk * PAGE_CHUNK_SIZE;
+  const pageStart = pageChunk * PAGE_CHUNK_SIZE;
   const pagedEntries = pageEntries.slice(pageStart, pageStart + PAGE_CHUNK_SIZE);
 
   return (
@@ -976,8 +1131,10 @@ function GlobalSearchItem({ item, keyword, returnTo }: { item: GlobalFindItem; k
                 </span>
                 <span style={{ fontFamily: fontBody, fontSize: 11, color: C.muted }}>Open →</span>
               </div>
-              <p style={{ fontFamily: fontBody, fontSize: 12, color: "#444", lineHeight: 1.55,
-                whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              <p style={{
+                fontFamily: fontBody, fontSize: 12, color: "#444", lineHeight: 1.55,
+                whiteSpace: "pre-wrap", wordBreak: "break-word"
+              }}>
                 {highlightKeyword(entry.snippet, keyword)}
               </p>
             </Link>
@@ -985,14 +1142,18 @@ function GlobalSearchItem({ item, keyword, returnTo }: { item: GlobalFindItem; k
           {pageEntries.length > PAGE_CHUNK_SIZE && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: fontBody, fontSize: 12 }}>
               <button onClick={() => setPageChunk(p => Math.max(0, p - 1))} disabled={pageChunk === 0}
-                style={{ padding: "3px 10px", border: `1px solid ${C.border}`, borderRadius: 3, cursor: "pointer",
-                  background: "white", color: C.navy, opacity: pageChunk === 0 ? 0.4 : 1 }}>
+                style={{
+                  padding: "3px 10px", border: `1px solid ${C.border}`, borderRadius: 3, cursor: "pointer",
+                  background: "white", color: C.navy, opacity: pageChunk === 0 ? 0.4 : 1
+                }}>
                 ‹ Prev
               </button>
               <span style={{ color: C.muted }}>{pageChunk + 1} / {totalChunks}</span>
               <button onClick={() => setPageChunk(p => Math.min(totalChunks - 1, p + 1))} disabled={pageChunk >= totalChunks - 1}
-                style={{ padding: "3px 10px", border: `1px solid ${C.border}`, borderRadius: 3, cursor: "pointer",
-                  background: "white", color: C.navy, opacity: pageChunk >= totalChunks - 1 ? 0.4 : 1 }}>
+                style={{
+                  padding: "3px 10px", border: `1px solid ${C.border}`, borderRadius: 3, cursor: "pointer",
+                  background: "white", color: C.navy, opacity: pageChunk >= totalChunks - 1 ? 0.4 : 1
+                }}>
                 Next ›
               </button>
             </div>
@@ -1033,7 +1194,7 @@ function beginFolderCardDragPreview(
   const rect = cardEl.getBoundingClientRect();
   pointerOffsetRef.current = {
     x: Math.max(0, Math.min(event.clientX - rect.left, rect.width)),
-    y: Math.max(0, Math.min(event.clientY - rect.top,  rect.height)),
+    y: Math.max(0, Math.min(event.clientY - rect.top, rect.height)),
   };
   const canvas = document.createElement("canvas");
   canvas.width = 1; canvas.height = 1;
@@ -1045,7 +1206,7 @@ function beginFolderCardDragPreview(
   Object.assign(ghost.style, {
     position: "fixed", boxSizing: "border-box", margin: "0",
     left: `${event.clientX - pointerOffsetRef.current.x}px`,
-    top:  `${event.clientY - pointerOffsetRef.current.y}px`,
+    top: `${event.clientY - pointerOffsetRef.current.y}px`,
     width: `${rect.width}px`, pointerEvents: "none",
     zIndex: "2147483647", opacity: "1",
   });
@@ -1076,7 +1237,7 @@ function extractSentencePreview(content: string, keyword: string): string {
   const idx = normalized.toLowerCase().indexOf(lowerKw);
   if (idx < 0) return normalized.length > max ? normalized.slice(0, max) + "..." : normalized;
   const start = Math.max(0, idx - radius);
-  const end   = Math.min(normalized.length, idx + lowerKw.length + radius);
+  const end = Math.min(normalized.length, idx + lowerKw.length + radius);
   return `${start > 0 ? "..." : ""}${normalized.slice(start, end)}${end < normalized.length ? "..." : ""}`;
 }
 

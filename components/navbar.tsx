@@ -54,7 +54,7 @@ export function Navbar() {
     <header
       style={{
         position: "sticky", top: 0, zIndex: 40,
-        width: "100%", height: 64,
+        width: "100%", height: 128,
         background: C.paper,
         borderBottom: `1px solid ${C.border}`,
         display: "flex", alignItems: "center",
@@ -63,32 +63,32 @@ export function Navbar() {
       <div
         style={{
           width: "100%", maxWidth: 1280,
-          margin: "0 auto", padding: "0 24px",
+          margin: "0 auto", padding: "0 48px",
           display: "flex", alignItems: "center", justifyContent: "space-between",
         }}
       >
         {/* ── Left: product title (links to folder dashboard) ── */}
         <Link href="/dashboard" style={{ textDecoration: "none" }}>
           <span style={{
-            fontFamily: fontSerif, fontSize: 17, fontWeight: 700,
+            fontFamily: fontSerif, fontSize: 34, fontWeight: 700,
             color: C.navy, lineHeight: 1.2, letterSpacing: "-0.01em",
-            maxWidth: 280,
+            maxWidth: 560,
           }}>
             Expressway Integrated Manual
           </span>
         </Link>
 
         {/* ── Right: dashboard + avatar menu ── */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
 
           <Link
             href="/dashboard"
             style={{
-              fontFamily: fontBody, fontSize: 13,
+              fontFamily: fontBody, fontSize: 26,
               color: C.navy, textDecoration: "none",
-              padding: "6px 14px",
+              padding: "12px 28px",
               border: `1px solid ${C.navy}`,
-              borderRadius: 4,
+              borderRadius: 8,
               transition: "background 200ms, color 200ms",
             }}
             onMouseEnter={(e) => {
@@ -109,11 +109,11 @@ export function Navbar() {
               type="button"
               onClick={() => setDropdownOpen(v => !v)}
               style={{
-                display: "flex", alignItems: "center", gap: 7,
+                display: "flex", alignItems: "center", gap: 14,
                 background: "white", border: `1px solid ${C.border}`,
-                borderRadius: 999, padding: "5px 12px 5px 7px",
+                borderRadius: 999, padding: "10px 24px 10px 14px",
                 cursor: "pointer", fontFamily: fontBody,
-                fontSize: 13, color: C.navy, fontWeight: 500,
+                fontSize: 26, color: C.navy, fontWeight: 500,
                 transition: "border-color 150ms",
               }}
               aria-label="User menu"
@@ -121,16 +121,16 @@ export function Navbar() {
             >
               {/* Avatar circle */}
               <span style={{
-                width: 24, height: 24, borderRadius: "50%",
+                width: 48, height: 48, borderRadius: "50%",
                 background: C.navy, color: "white",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 11, fontWeight: 700, fontFamily: fontSerif,
+                fontSize: 22, fontWeight: 700, fontFamily: fontSerif,
                 flexShrink: 0,
               }}>
                 {username.charAt(0).toUpperCase()}
               </span>
               {username}
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" strokeWidth="2.5" aria-hidden>
                 <path d="m6 9 6 6 6-6" />
               </svg>
@@ -139,26 +139,26 @@ export function Navbar() {
             {/* Dropdown panel */}
             {dropdownOpen && (
               <div style={{
-                position: "absolute", top: "calc(100% + 8px)", right: 0,
+                position: "absolute", top: "calc(100% + 16px)", right: 0,
                 background: C.paper, border: `1px solid ${C.border}`,
-                borderRadius: 6, minWidth: 192,
+                borderRadius: 12, minWidth: 384,
                 boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
                 zIndex: 100, overflow: "hidden",
               }}>
                 {/* User info header */}
                 <div style={{
-                  padding: "10px 14px 8px",
+                  padding: "20px 28px 16px",
                   borderBottom: `1px solid ${C.border}`,
                 }}>
                   <p style={{
-                    fontFamily: fontBody, fontSize: 10, color: C.muted,
+                    fontFamily: fontBody, fontSize: 20, color: C.muted,
                     letterSpacing: "0.07em", textTransform: "uppercase",
-                    marginBottom: 3,
+                    marginBottom: 6,
                   }}>
                     {canManageUsers ? "Administrator" : "Member"}
                   </p>
                   <p style={{
-                    fontFamily: fontBody, fontSize: 12, color: C.navy,
+                    fontFamily: fontBody, fontSize: 24, color: C.navy,
                     wordBreak: "break-all",
                   }}>
                     {user?.email}
@@ -178,7 +178,7 @@ export function Navbar() {
                   onClick={() => { setDropdownOpen(false); logoutMutation.mutate(); }}
                   style={{
                     width: "100%", textAlign: "left",
-                    padding: "10px 14px", fontFamily: fontBody, fontSize: 13,
+                    padding: "20px 28px", fontFamily: fontBody, fontSize: 26,
                     color: "#c0392b", background: "none", border: "none",
                     cursor: "pointer", transition: "background 150ms",
                   }}
@@ -204,9 +204,9 @@ function DropdownLink({
       href={href}
       onClick={onClick}
       style={{
-        display: "block", padding: "10px 14px",
+        display: "block", padding: "20px 28px",
         fontFamily: "'Source Serif 4', Georgia, serif",
-        fontSize: 13, color: "#1a2744",
+        fontSize: 26, color: "#1a2744",
         textDecoration: "none",
         borderBottom: "1px solid #d0c4aa",
         transition: "background 150ms",

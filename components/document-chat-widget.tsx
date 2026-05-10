@@ -334,8 +334,8 @@ export function DocumentChatWidget({
           {showTooltip && (
             <div className="lib-tooltip-pill" style={{
               background: C.navy, color: C.paper,
-              fontFamily: fontBody, fontSize: 11, fontStyle: "italic",
-              padding: "5px 12px", borderRadius: 20,
+              fontFamily: fontBody, fontSize: 22, fontStyle: "italic",
+              padding: "10px 24px", borderRadius: 40,
               pointerEvents: "none", whiteSpace: "nowrap",
             }}>
               Press / to open AI chat
@@ -348,19 +348,19 @@ export function DocumentChatWidget({
             style={{
               background: tabHovered ? C.gold : C.navy,
               color: C.paper,
-              fontFamily: fontBody, fontSize: 13,
+              fontFamily: fontBody, fontSize: 26,
               letterSpacing: "0.06em",
-              padding: "10px 20px",
-              borderRadius: "4px 4px 0 0",
+              padding: "20px 40px",
+              borderRadius: "8px 8px 0 0",
               border: "none", cursor: "pointer",
-              boxShadow: "0 -4px 16px rgba(0,0,0,0.16)",
-              display: "flex", alignItems: "center", gap: 8,
-              transform: tabHovered ? "translateY(-3px)" : "translateY(0)",
+              boxShadow: "0 -8px 32px rgba(0,0,0,0.16)",
+              display: "flex", alignItems: "center", gap: 16,
+              transform: tabHovered ? "translateY(-6px)" : "translateY(0)",
               transition: "background 200ms, transform 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94)",
             }}
             title="Open AI chat (/)"
           >
-            <BookIcon size={15} color={tabHovered ? "white" : C.gold} />
+            <BookIcon size={30} color={tabHovered ? "white" : C.gold} />
             AI
           </button>
         </div>
